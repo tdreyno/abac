@@ -1,5 +1,5 @@
 {
-  "name": "abac",
+  "name": "@tdreyno/abac",
   "version": "0.1.0",
   "description": "Constructor-only ReBAC-first authorization library",
   "publishConfig": {

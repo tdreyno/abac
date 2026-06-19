@@ -1,8 +1,8 @@
 ---
-"abac": minor
+"@tdreyno/abac": minor
 ---
 
-Initial public release of `abac`.
+Initial public release of `@tdreyno/abac`.
 
 Highlights:
 - Constructor-based, composable authorization rule algebra.

@@ -7,7 +7,7 @@ ABAC ships an in-memory adapter for local authorization checks and testing.
 createInMemoryAdapter takes relation facts and an optional global domain:
 
 ```ts
-import { createInMemoryAdapter } from "abac"
+import { createInMemoryAdapter } from "@tdreyno/abac"
 
 const adapter = createInMemoryAdapter({
   relations: [
@@ -26,7 +26,7 @@ const adapter = createInMemoryAdapter({
 ## Building an Evaluator
 
 ```ts
-import { evaluator } from "abac"
+import { evaluator } from "@tdreyno/abac"
 
 const engine = evaluator(adapter, {
   evaluatorContext: undefined,

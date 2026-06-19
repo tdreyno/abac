@@ -17,7 +17,7 @@ Benefits:
 is(termValue, predicate) creates a derived term with additional unary filtering.
 
 ```ts
-import { is, term } from "abac"
+import { is, term } from "@tdreyno/abac"
 
 type User = { id: string; suspended: boolean }
 

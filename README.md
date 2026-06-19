@@ -1,4 +1,4 @@
-# abac
+# @tdreyno/abac
 
 A constructor-only, ReBAC-first authorization library.
 
@@ -16,7 +16,7 @@ Instances expose only:
 ## Example
 
 ```ts
-import { ability, and } from "abac"
+import { ability, and } from "@tdreyno/abac"
 
 const canEditDocument = ability("canEditDocument", {
   description: "Can edit own document",

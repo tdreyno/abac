@@ -5,13 +5,19 @@ ABAC is a small TypeScript library for expressing authorization as composable lo
 ## Install
 
 ```bash
-npm install abac
+npm install @tdreyno/abac
 ```
 
 ## First Rule
 
 ```ts
-import { and, createInMemoryAdapter, evaluator, relation, term } from "abac"
+import {
+  and,
+  createInMemoryAdapter,
+  evaluator,
+  relation,
+  term,
+} from "@tdreyno/abac"
 
 type User = { id: string; suspended: boolean }
 type Document = { id: string }
