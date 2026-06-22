@@ -23,6 +23,10 @@ export {
   createInMemoryAdapter,
   validateStratifiedNegation,
 } from "./core/algebra-inmemory"
+export {
+  createPostgresAdapter,
+  planPostgresRule,
+} from "./core/algebra-postgres"
 export type {
   Environment,
   EvaluationProof,
@@ -37,3 +41,17 @@ export type {
   InMemoryAdapterOptions,
   InMemoryRelationFacts,
 } from "./core/algebra-inmemory"
+export type {
+  PlannedPostgresRule,
+  PostgresAdapterOptions,
+  PostgresEdgeRelationSource,
+  PostgresJoinTableRelationSource,
+  PostgresProofDiagnostic,
+  PostgresQueryExecutor,
+  PostgresQueryResult,
+  PostgresRelationMapping,
+  PostgresRelationSource,
+  PostgresTermEncoder,
+  PostgresTermEncoding,
+  PostgresTermDomainSource,
+} from "./core/algebra-postgres"

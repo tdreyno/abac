@@ -1,0 +1,435 @@
+import {
+  and,
+  createPostgresAdapter,
+  eq,
+  evaluator,
+  forAll,
+  not,
+  or,
+  planPostgresRule,
+  relation,
+  term,
+} from "../src"
+import type { PostgresQueryResult } from "../src"
+
+const queryResult = <Row extends Record<string, unknown>>(
+  rows: ReadonlyArray<Row>,
+): PostgresQueryResult<Row> => ({ rows })
+
+const encodeId = (value: { id: string }) => value.id
+
+describe("postgres algebra adapter", () => {
+  it("plans a join-table-backed relation with filter pushdown and diagnostics", () => {
+    const actor = term<{ id: string }>()
+    const workspace = term<{ id: string }>()
+    const role = term<string>()
+
+    const userInWorkspace = relation<{ id: string }, { id: string }>()
+    const userHasWorkspaceRole = relation<{ id: string }, string>()
+
+    const rule = and(
+      userInWorkspace(actor, workspace),
+      userHasWorkspaceRole(actor, role),
+      eq(role, "owner"),
+    )
+
+    const plan = planPostgresRule(rule, {
+      relationMappings: [
+        {
+          relation: userInWorkspace,
+          source: {
+            kind: "join-table",
+            table: "public.workspace_memberships",
+            leftColumn: "user_id",
+            rightColumn: "workspace_id",
+            staticFilters: [{ sql: "{{source}}.deleted_at IS NULL" }],
+            recommendedView: "public.active_workspace_memberships",
+          },
+        },
+        {
+          relation: userHasWorkspaceRole,
+          source: {
+            kind: "join-table",
+            table: "public.workspace_memberships",
+            leftColumn: "user_id",
+            rightColumn: "role",
+            staticFilters: [{ sql: "{{source}}.deleted_at IS NULL" }],
+          },
+        },
+      ],
+      termEncodings: [
+        { term: actor, encode: encodeId },
+        { term: workspace, encode: encodeId },
+      ],
+      environment: {
+        [actor]: { id: "u1" },
+        [workspace]: { id: "w1" },
+      },
+    })
+
+    expect(plan.sql).toContain("SELECT EXISTS")
+    expect(plan.sql).toContain('"public"."workspace_memberships" "rel1"')
+    expect(plan.sql).toContain('"public"."workspace_memberships" "rel2"')
+    expect(plan.sql).toContain('"rel1".deleted_at IS NULL')
+    expect(plan.sql).toContain('"rel2".deleted_at IS NULL')
+    expect(plan.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "missing-join-table-index-hint",
+          level: "warning",
+        }),
+        expect.objectContaining({
+          code: "consider-join-table-view",
+          level: "info",
+        }),
+      ]),
+    )
+  })
+
+  it("avoids join-table index warnings when suggested indexes exist", () => {
+    const actor = term<{ id: string }>()
+    const workspace = term<{ id: string }>()
+    const userInWorkspace = relation<{ id: string }, { id: string }>()
+
+    const plan = planPostgresRule(userInWorkspace(actor, workspace), {
+      relationMappings: [
+        {
+          relation: userInWorkspace,
+          source: {
+            kind: "join-table",
+            table: "workspace_memberships",
+            leftColumn: "user_id",
+            rightColumn: "workspace_id",
+            suggestedIndexes: [
+              {
+                columns: ["user_id", "workspace_id"],
+                where: "deleted_at IS NULL",
+              },
+            ],
+            staticFilters: [{ sql: "{{source}}.deleted_at IS NULL" }],
+          },
+        },
+      ],
+      environment: {},
+    })
+
+    expect(plan.diagnostics).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "missing-join-table-index-hint" }),
+      ]),
+    )
+  })
+
+  it("plans correlated or branches as nested existential subqueries", () => {
+    const actor = term<{ id: string }>()
+    const role = term<string>()
+    const userHasWorkspaceRole = relation<{ id: string }, string>()
+
+    const plan = planPostgresRule(
+      and(
+        userHasWorkspaceRole(actor, role),
+        or(eq(role, "owner"), eq(role, "manager")),
+      ),
+      {
+        relationMappings: [
+          {
+            relation: userHasWorkspaceRole,
+            source: {
+              kind: "join-table",
+              table: "workspace_memberships",
+              leftColumn: "user_id",
+              rightColumn: "role",
+            },
+          },
+        ],
+        termEncodings: [{ term: actor, encode: encodeId }],
+        environment: {
+          [actor]: { id: "u1" },
+        },
+      },
+    )
+
+    expect(plan.sql).toContain("EXISTS(SELECT 1 WHERE")
+    expect(plan.sql).toContain("UNION ALL")
+    expect(plan.params).toHaveLength(3)
+  })
+
+  it("plans correlated not branches as not exists subqueries", () => {
+    const actor = term<{ id: string }>()
+    const role = term<string>()
+    const userHasWorkspaceRole = relation<{ id: string }, string>()
+
+    const plan = planPostgresRule(
+      and(userHasWorkspaceRole(actor, role), not(eq(role, "suspended"))),
+      {
+        relationMappings: [
+          {
+            relation: userHasWorkspaceRole,
+            source: {
+              kind: "join-table",
+              table: "workspace_memberships",
+              leftColumn: "user_id",
+              rightColumn: "role",
+            },
+          },
+        ],
+        termEncodings: [{ term: actor, encode: encodeId }],
+        environment: {
+          [actor]: { id: "u1" },
+        },
+      },
+    )
+
+    expect(plan.sql).toContain("NOT EXISTS(SELECT 1 WHERE")
+    expect(plan.params).toHaveLength(2)
+  })
+
+  it("returns proof details with diagnostics", async () => {
+    const actor = term<{ id: string }>()
+    const workspace = term<{ id: string }>()
+    const userInWorkspace = relation<{ id: string }, { id: string }>()
+
+    const captured: Array<{ sql: string; params: ReadonlyArray<unknown> }> = []
+
+    const adapter = createPostgresAdapter({
+      relationMappings: [
+        {
+          relation: userInWorkspace,
+          source: {
+            kind: "join-table",
+            table: "workspace_memberships",
+            leftColumn: "user_id",
+            rightColumn: "workspace_id",
+          },
+        },
+      ],
+      termEncodings: [{ term: actor, encode: encodeId }],
+      queryExecutor: {
+        query: async <Row extends Record<string, unknown>>(
+          sql: string,
+          params: ReadonlyArray<unknown>,
+        ) => {
+          captured.push({ sql, params })
+          return queryResult([{ ok: true } as unknown as Row])
+        },
+      },
+    })
+    const instance = evaluator(adapter, {
+      evaluatorContext: null,
+    })
+
+    const proof = await instance.evaluateWithProof(
+      userInWorkspace(actor, workspace),
+      {
+        [actor]: { id: "u1" },
+      },
+    )
+
+    expect(proof.ok).toBe(true)
+    expect(proof.details).toEqual(
+      expect.objectContaining({
+        paramCount: captured[0]?.params.length,
+        sql: captured[0]?.sql,
+        diagnostics: expect.arrayContaining([
+          expect.objectContaining({ code: "missing-join-table-index-hint" }),
+        ]),
+      }),
+    )
+  })
+
+  it("encodes bound object terms and eq values through configured term encodings", () => {
+    const actor = term<{ id: string }>()
+    const workspace = term<{ id: string }>()
+    const userInWorkspace = relation<{ id: string }, { id: string }>()
+
+    const plan = planPostgresRule(
+      and(userInWorkspace(actor, workspace), eq(workspace, { id: "w1" })),
+      {
+        relationMappings: [
+          {
+            relation: userInWorkspace,
+            source: {
+              kind: "join-table",
+              table: "workspace_memberships",
+              leftColumn: "user_id",
+              rightColumn: "workspace_id",
+            },
+          },
+        ],
+        termEncodings: [
+          {
+            term: actor,
+            encode: (value: { id: string }) => value.id,
+          },
+          {
+            term: workspace,
+            encode: (value: { id: string }) => value.id,
+          },
+        ],
+        environment: {
+          [actor]: { id: "u1" },
+        },
+      },
+    )
+
+    expect(plan.params).toEqual(["u1", "w1"])
+  })
+
+  it("fails fast for bound object terms without a configured term encoder", () => {
+    const actor = term<{ id: string }>()
+    const workspace = term<{ id: string }>()
+    const userInWorkspace = relation<{ id: string }, { id: string }>()
+
+    expect(() =>
+      planPostgresRule(userInWorkspace(actor, workspace), {
+        relationMappings: [
+          {
+            relation: userInWorkspace,
+            source: {
+              kind: "join-table",
+              table: "workspace_memberships",
+              leftColumn: "user_id",
+              rightColumn: "workspace_id",
+            },
+          },
+        ],
+        environment: {
+          [actor]: { id: "u1" },
+        },
+      }),
+    ).toThrow(
+      "postgres adapter requires a term encoder for bound object values; configure termEncodings for this term",
+    )
+  })
+
+  it("plans forall with an explicit term domain as a counterexample not exists query", () => {
+    const viewer = term<{ id: string }>()
+    const membership = term<{ id: string }>()
+    const team = term<{ id: string }>()
+    const document = term<{ id: string }>()
+
+    const userHasMembership = relation<{ id: string }, { id: string }>()
+    const membershipBelongsToTeam = relation<{ id: string }, { id: string }>()
+    const teamOwnsDocument = relation<{ id: string }, { id: string }>()
+
+    const memberRule = and(
+      userHasMembership(viewer, membership),
+      membershipBelongsToTeam(membership, team),
+      teamOwnsDocument(team, document),
+    )
+
+    const plan = planPostgresRule(forAll(document, memberRule), {
+      relationMappings: [
+        {
+          relation: userHasMembership,
+          source: {
+            kind: "join-table",
+            table: "workspace_memberships",
+            leftColumn: "user_id",
+            rightColumn: "membership_id",
+          },
+        },
+        {
+          relation: membershipBelongsToTeam,
+          source: {
+            kind: "edge",
+            table: "membership_teams",
+            leftColumn: "membership_id",
+            rightColumn: "team_id",
+          },
+        },
+        {
+          relation: teamOwnsDocument,
+          source: {
+            kind: "edge",
+            table: "team_documents",
+            leftColumn: "team_id",
+            rightColumn: "document_id",
+          },
+        },
+      ],
+      termEncodings: [{ term: viewer, encode: encodeId }],
+      termDomains: [
+        {
+          term: document,
+          table: "documents",
+          valueColumn: "id",
+          staticFilters: [{ sql: "{{source}}.deleted_at IS NULL" }],
+        },
+      ],
+      environment: {
+        [viewer]: { id: "u1" },
+      },
+    })
+
+    expect(plan.sql).toContain("NOT EXISTS(SELECT 1 FROM (SELECT DISTINCT")
+    expect(plan.sql).toContain('"documents" "dom1"')
+    expect(plan.sql).toContain('"forall2".candidate')
+    expect(plan.diagnostics).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "forall-without-domain-source" }),
+      ]),
+    )
+  })
+
+  it("uses relation-derived forall candidates and emits a diagnostic when no explicit term domain exists", () => {
+    const viewer = term<{ id: string }>()
+    const membership = term<{ id: string }>()
+    const team = term<{ id: string }>()
+    const document = term<{ id: string }>()
+
+    const userHasMembership = relation<{ id: string }, { id: string }>()
+    const membershipBelongsToTeam = relation<{ id: string }, { id: string }>()
+    const teamOwnsDocument = relation<{ id: string }, { id: string }>()
+
+    const memberRule = and(
+      userHasMembership(viewer, membership),
+      membershipBelongsToTeam(membership, team),
+      teamOwnsDocument(team, document),
+    )
+
+    const plan = planPostgresRule(forAll(document, memberRule), {
+      relationMappings: [
+        {
+          relation: userHasMembership,
+          source: {
+            kind: "join-table",
+            table: "workspace_memberships",
+            leftColumn: "user_id",
+            rightColumn: "membership_id",
+          },
+        },
+        {
+          relation: membershipBelongsToTeam,
+          source: {
+            kind: "edge",
+            table: "membership_teams",
+            leftColumn: "membership_id",
+            rightColumn: "team_id",
+          },
+        },
+        {
+          relation: teamOwnsDocument,
+          source: {
+            kind: "edge",
+            table: "team_documents",
+            leftColumn: "team_id",
+            rightColumn: "document_id",
+          },
+        },
+      ],
+      termEncodings: [{ term: viewer, encode: encodeId }],
+      environment: {
+        [viewer]: { id: "u1" },
+      },
+    })
+
+    expect(plan.sql).toContain('FROM "team_documents" "dom1"')
+    expect(plan.sql).toContain('"forall2".candidate')
+    expect(plan.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "forall-derived-domain" }),
+      ]),
+    )
+  })
+})
