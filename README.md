@@ -1,146 +1,172 @@
-# @tdreyno/rules
+# @tdreyno/he-said
 
-A constructor-only, ReBAC-first authorization library.
+Type-safe authorization rule algebra for TypeScript.
 
-## API
+he-said lets you model authorization as composable, typed rules instead of scattered conditionals.
 
-- `ability(name, options?)`
-- `or(...abilities)`
-- `and(...abilities)`
-- `not(ability)`
+Use it to express RBAC, ABAC, ACL, and graph-style access checks with one consistent API.
 
-Instances expose only:
+## Why he-said
 
-- `can(context, deps?)`
+- Type-safe terms and relations with strong TypeScript inference
+- Composable logic operators for readable, testable policies
+- In-memory evaluation for local development and unit tests
+- Postgres planning and execution support for production data
+- Proof-oriented evaluation APIs for debugging policy behavior
 
-## Example
+## Install
 
-```ts
-import { ability, and } from "@tdreyno/rules"
-
-const canEditDocument = ability("canEditDocument", {
-  description: "Can edit own document",
-  where: ({ action }) => action === "edit",
-  relation: ({ subject, resource }) => ({
-    subject: `user:${subject.id}`,
-    relation: "owner",
-    object: `document:${resource.id}`,
-  }),
-})
-
-const isNotSuspended = ability("isNotSuspended", {
-  where: ({ subject }) => !subject.suspended,
-})
-
-const policy = and(canEditDocument, isNotSuspended)
-
-const allowed = await policy.can(
-  {
-    subject: { id: "u1", suspended: false },
-    action: "edit",
-    resource: { id: "d1" },
-    environment: {},
-  },
-  {
-    hasRelation: async tuple => tuple.relation === "owner",
-  },
-)
+```bash
+npm install @tdreyno/he-said
 ```
 
-## Repository Context
+## Quick Start
 
-This section captures project decisions and workflow expectations for future sessions.
+```ts
+import {
+  and,
+  createInMemoryAdapter,
+  evaluator,
+  relation,
+  term,
+} from "@tdreyno/he-said"
 
-### Product and API Contract
+type User = { id: string; suspended: boolean }
+type Document = { id: string }
 
-- Constructor-only API. No builder pattern, and no build/commit lifecycle in public API.
-- Ability signature is fixed to `ability(name, options?)`.
-- `name` is required and `options` is optional.
-- `description` is the supported metadata field name (not `reason`).
-- Public execution surface is `can(context, deps?)` only.
-- Do not add `cannot` or `evaluate` unless explicitly requested.
-- Composition names are fixed to `or`, `and`, and `not` with no aliases.
-- Backward compatibility wrappers are intentionally out of scope.
-- Domain grouping is external to this library (consumer-managed registries/maps).
-- ReBAC-first checks are first-class; generic `where` predicates remain supported.
+const actor = term<User>()
+const document = term<Document>()
 
-### Runtime Behavior Expectations
+const userOwnsDocument = relation<User, Document>()
+const activeActor = actor.is(value => !value.suspended)
 
-- `ability(name, options?)` validates and trims `name`.
-- Relation checks deny by default when relation constraints exist but no resolver is provided.
-- `where` supports sync and async predicates.
-- `relation` supports tuple values, arrays of tuples, functions of context, async functions, and mixed arrays.
+const canReadDocument = and(userOwnsDocument(activeActor, document))
 
-### Source Layout
+const u1 = { id: "u1", suspended: false }
+const u2 = { id: "u2", suspended: true }
+const d1 = { id: "d1" }
 
-- `src/index.ts`
-- `src/core/types.ts`
-- `src/core/ability.ts`
-- `src/core/policy.ts`
-- `src/core/instance.ts`
-- `src/core/task.ts`
-- `src/core/planner.ts`
-- `src/core/interpreter.ts`
-- `src/core/executor.ts`
-- `src/core/rebac.ts`
-- `test/ability.test.ts`
-- `test/ability.typecheck.ts`
+const instance = evaluator(
+  createInMemoryAdapter({
+    relations: [
+      {
+        relation: userOwnsDocument,
+        pairs: [
+          [u1, d1],
+          [u2, d1],
+        ],
+      },
+    ],
+    domain: [u1, u2, d1],
+  }),
+  { evaluatorContext: null },
+)
 
-### Validation Workflow
+const allowed = await instance.evaluate(canReadDocument, {
+  [actor]: u1,
+  [document]: d1,
+})
 
-Run all of the following before concluding work:
+const blocked = await instance.evaluate(canReadDocument, {
+  [actor]: u2,
+  [document]: d1,
+})
+```
 
-- `npm run build`
-- `npm test`
-- `npm run test:types`
+## What You Can Model
 
-Recommended full local gate (Fizz-style):
+- RBAC: role and scope checks
+- ABAC: attribute and context predicates
+- ACL: explicit grant relations
+- ReBAC-style checks: graph and relationship constraints
 
-- `npm run lint`
-- `npm run typecheck`
-- `npm run build`
-- `npm run test:ci`
-- `npm run test:types`
+## Core API
 
-Notes:
+Core constructors:
 
-- Runtime tests live in `test/ability.test.ts`.
-- Compile-time type assertions live in `test/ability.typecheck.ts` and are validated via `test:types`.
-- Keep typecheck files out of Jest test filename patterns (`*.test.ts`) to avoid runtime test failures.
+- `term<T>()`
+- `term<T>().is(predicate)`
+- `relation<Left, Right>()`
+- `eq(leftTerm, rightTermOrValue)`
 
-### Suggested Next Technical Focus
+Composition operators:
 
-- Further harden relation typing for complex array/function combinations.
-- Add docs for the `deps` contract with concrete ReBAC resolver examples.
-- Add performance tests for deep policy composition trees.
+- `and(...constraints)`
+- `or(...constraints)`
+- `not(constraint)`
+- `implies(premise, consequence)`
+- `oneOf(term, values)`
+- `atLeast(count, ...constraints)`
+- `atMost(count, ...constraints)`
+- `exactly(count, ...constraints)`
+- `through(term).to(relation, term)`
+- `forAll(term, constraint)`
+- `select(...terms)(constraint)`
+- `distinct(constraint)`
+- `letRule(name, constraint)`
+- `ref(name)`
 
-## Tooling and Release Workflow
+Evaluator:
 
-This repository follows the same local pattern as Fizz for tooling, testing, versioning, and publishing.
+- `evaluator(adapter, { evaluatorContext })`
+- `instance.evaluate(rule, environment)`
+- `instance.evaluateWithProof(rule, environment)`
 
-### Tooling Scripts
+## Common Building Blocks
 
-- `npm run format` formats TypeScript/JavaScript/JSON/Markdown with Prettier.
-- `npm run lint` runs ESLint.
-- `npm run lint:fix` runs ESLint with auto-fixes.
-- `npm run typecheck` runs TypeScript no-emit checking.
-- `npm run clean` removes build output.
+- Deny rule: `not(...)`
+- Action families: `oneOf(action, ["read", "download"])`
+- Cardinality constraints: `atLeast`, `atMost`, `exactly`
+- Reusable subrules: `letRule(name, rule)` and `ref(name)`
+- Quantified constraints: `forAll(term, constraint)`
+- Fluent relation chains: `through(term).to(relation, term)`
 
-### Testing and Build Scripts
+## Adapters
 
-- `npm run build` compiles to `dist`.
-- `npm test` runs Jest tests.
-- `npm run test:ci` runs Jest in CI mode with coverage.
-- `npm run test:types` runs compile-time type assertion checks.
+### In-Memory Adapter
 
-### Changesets Versioning
+Use for local evaluation, unit tests, and rule debugging.
 
-- `.changeset/config.json` is configured for `main` as the base branch.
-- `npm run changeset` creates pending version entries.
-- `changeset version` updates package versions and changelog content.
+- `createInMemoryAdapter({ relations, domain? })`
+- `validateStratifiedNegation(rule)`
 
-### Publishing
+### Postgres Adapter
 
-- Package publishes with `publishConfig.access` set to `public`.
-- `npm run release` runs build, lint, tests, type tests, then executes `changeset version` and `changeset publish`.
-- GitHub Actions are intentionally not configured in this repository at this stage.
+Use when relation facts are persisted in SQL tables.
+
+- `createPostgresAdapter({ relationMappings, queryExecutor, ... })`
+- `planPostgresRule(rule, { relationMappings, environment, ... })`
+
+`planPostgresRule` can produce diagnostics for join-table index hints, domain coverage for `forAll`, and other planner guidance.
+
+## Documentation
+
+- [Getting Started](docs/getting-started.md)
+- [Core Concepts](docs/core-concepts.md)
+- [API Documentation](docs/api.md)
+- [In-Memory Evaluation](docs/in-memory-evaluation.md)
+- [Type Safety and Terms](docs/type-safety-and-terms.md)
+- [RBAC Example](docs/rbac-implementation.md)
+- [ACL Example](docs/acl-implementation.md)
+- [ABAC Example](docs/abac-implementation.md)
+- [FAQ](docs/faq.md)
+
+## When To Use
+
+Use he-said when you want policy logic to be explicit, typed, and reusable across services, route handlers, and tests.
+
+If your authorization model is small today but expected to grow, starting with composable rules helps avoid hard-to-maintain permission conditionals later.
+
+## Development
+
+```bash
+npm run lint
+npm run typecheck
+npm run build
+npm run test:ci
+npm run test:types
+```
+
+## License
+
+MIT

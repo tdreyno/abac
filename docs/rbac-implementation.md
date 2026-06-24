@@ -1,6 +1,6 @@
 # Implementing RBAC
 
-This guide shows a simple, real-world RBAC model in Rules.
+This guide shows a simple, real-world RBAC model in he-said.
 
 Scenario:
 
@@ -28,7 +28,7 @@ type Project = { id: string; workspaceId: string; ownerId: string }
 ### Terms and Relations
 
 ```ts
-import { and, eq, oneOf, or, relation, term } from "@tdreyno/rules"
+import { and, eq, oneOf, or, relation, term } from "@tdreyno/he-said"
 
 const actor = term<User>()
 const role = term<Role>()

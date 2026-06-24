@@ -1,6 +1,6 @@
 # Core Concepts
 
-Rules models authorization as rule algebra over typed terms.
+he-said models authorization as rule algebra over typed terms.
 
 ## Terms
 
@@ -19,7 +19,7 @@ Use relation<Left, Right>() to define graph edges between typed terms.
 
 ## Rule Composition
 
-Rules supports logical and structural operators:
+he-said supports logical and structural operators:
 
 - and(...constraints)
 - or(...constraints)

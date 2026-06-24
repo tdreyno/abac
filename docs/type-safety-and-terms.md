@@ -1,6 +1,6 @@
 # Type Safety and Terms
 
-Rules is designed around strongly typed terms and relation signatures.
+he-said is designed around strongly typed terms and relation signatures.
 
 ## Why Terms Are Symbols
 
@@ -17,7 +17,7 @@ Benefits:
 termValue.is(predicate) creates a derived term with additional unary filtering.
 
 ```ts
-import { term } from "@tdreyno/rules"
+import { term } from "@tdreyno/he-said"
 
 type User = { id: string; suspended: boolean }
 

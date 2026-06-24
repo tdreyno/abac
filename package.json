@@ -1,5 +1,5 @@
 {
-  "name": "@tdreyno/rules",
+  "name": "@tdreyno/he-said",
   "version": "0.1.0",
   "description": "Functional auth rules for JavaScript and TypeScript applications.",
   "publishConfig": {

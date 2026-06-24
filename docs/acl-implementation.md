@@ -1,6 +1,6 @@
 # Implementing ACL
 
-This guide shows a simple, real-world ACL model in Rules.
+This guide shows a simple, real-world ACL model in he-said.
 
 Scenario:
 
@@ -28,7 +28,7 @@ type AclEntry = { id: string }
 ### Terms and Relations
 
 ```ts
-import { and, eq, oneOf, or, relation, term } from "@tdreyno/rules"
+import { and, eq, oneOf, or, relation, term } from "@tdreyno/he-said"
 
 const actor = term<User>()
 const document = term<Document>()

@@ -1,6 +1,6 @@
 # Implementing ABAC
 
-This guide shows a simple, real-world ABAC model in Rules.
+This guide shows a simple, real-world ABAC model in he-said.
 
 Scenario:
 
@@ -34,7 +34,7 @@ type CustomerRecord = {
 ### Terms and Predicates
 
 ```ts
-import { and, atMost, eq, not, oneOf, or, term } from "@tdreyno/rules"
+import { and, atMost, eq, not, oneOf, or, term } from "@tdreyno/he-said"
 
 const actor = term<User>()
 const record = term<CustomerRecord>()

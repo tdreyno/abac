@@ -1,13 +1,13 @@
 # In-Memory Evaluation
 
-Rules ships an in-memory adapter for local authorization checks and testing.
+he-said ships an in-memory adapter for local authorization checks and testing.
 
 ## createInMemoryAdapter
 
 createInMemoryAdapter takes relation facts and an optional global domain:
 
 ```ts
-import { createInMemoryAdapter } from "@tdreyno/rules"
+import { createInMemoryAdapter } from "@tdreyno/he-said"
 
 const adapter = createInMemoryAdapter({
   relations: [
@@ -26,7 +26,7 @@ const adapter = createInMemoryAdapter({
 ## Building an Evaluator
 
 ```ts
-import { evaluator } from "@tdreyno/rules"
+import { evaluator } from "@tdreyno/he-said"
 
 const engine = evaluator(adapter, {
   evaluatorContext: undefined,

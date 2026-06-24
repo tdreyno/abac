@@ -1,11 +1,11 @@
 # Getting Started
 
-Rules is a small TypeScript library for expressing authorization as composable logic rules.
+he-said is a small TypeScript library for expressing authorization as composable logic rules.
 
 ## Install
 
 ```bash
-npm install @tdreyno/rules
+npm install @tdreyno/he-said
 ```
 
 ## First Rule
@@ -20,7 +20,7 @@ import {
   or,
   relation,
   term,
-} from "@tdreyno/rules"
+} from "@tdreyno/he-said"
 
 type User = { id: string; suspended: boolean }
 type Document = { id: string }

@@ -2,7 +2,7 @@
 
 ## Exports
 
-Rules exports algebra constructors, an in-memory adapter, and related types.
+he-said exports algebra constructors, an in-memory adapter, and related types.
 
 ### Algebra Constructors
 

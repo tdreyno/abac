@@ -15,9 +15,9 @@ import {
 const postgresConfig = {
   host: process.env.POSTGRES_HOST ?? "127.0.0.1",
   port: Number(process.env.POSTGRES_PORT ?? "54329"),
-  user: process.env.POSTGRES_USER ?? "abac",
-  password: process.env.POSTGRES_PASSWORD ?? "abac",
-  database: process.env.POSTGRES_DB ?? "abac_test",
+  user: process.env.POSTGRES_USER ?? "he_said",
+  password: process.env.POSTGRES_PASSWORD ?? "he_said",
+  database: process.env.POSTGRES_DB ?? "he_said_test",
 }
 
 const connectWithRetry = async (): Promise<Client> => {
