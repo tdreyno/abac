@@ -203,11 +203,13 @@ const sortAndChildren = (children: ReadonlyArray<Rule>): Array<Rule> => {
         return 0
       case "eq-term":
       case "eq-value":
+      case "derives":
         return 1
       case "ref":
       case "select":
       case "distinct":
       case "memo":
+      case "given":
         return 2
       case "term":
       case "unary":
@@ -257,6 +259,8 @@ const collectDefinitions = (rule: Rule): Map<string, Rule> => {
       case "eq-term":
       case "eq-value":
       case "ref":
+      case "derives":
+      case "given":
         return
       default: {
         const exhaustive: never = node
@@ -500,6 +504,8 @@ const collectRelationTermSources = (
       case "unary":
       case "eq-term":
       case "eq-value":
+      case "derives":
+      case "given":
         return
       default: {
         const exhaustive: never = node
@@ -631,13 +637,20 @@ const compileExistsSql = (
     case "distinct":
       state.distinctApplied += 1
       return compileExistsSql(rule.child, state, inheritedColumns)
+    case "given": {
+      const contextColumns = cloneColumns(inheritedColumns)
+      const contextSql = compileExistsSql(rule.context, state, contextColumns)
+      const ruleSql = compileExistsSql(rule.rule, state, inheritedColumns)
+      return `SELECT 1 WHERE EXISTS(${contextSql}) AND EXISTS(${ruleSql})`
+    }
     case "term":
     case "unary":
       return ensureSupportedNode(rule)
     case "and":
     case "relation":
     case "eq-value":
-    case "eq-term": {
+    case "eq-term":
+    case "derives": {
       const builder = createBuilder()
       builder.columns = cloneColumns(inheritedColumns)
       appendConjunctiveRule(rule, builder, state)
@@ -682,6 +695,16 @@ const appendConjunctiveRule = (
     case "distinct":
       state.distinctApplied += 1
       return appendConjunctiveRule(rule.child, builder, state)
+    case "derives":
+      return appendEqTerm(
+        { type: "eq-term", left: rule.entity, right: rule.from },
+        builder,
+      )
+    case "given":
+      builder.whereClauses.push(
+        `EXISTS(${compileExistsSql(rule.context, state, builder.columns)})`,
+      )
+      return appendConjunctiveRule(rule.rule, builder, state)
     case "or":
     case "forall":
       builder.whereClauses.push(

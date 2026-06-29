@@ -205,6 +205,8 @@ export type Rule =
   | SelectNode
   | DistinctNode
   | MemoNode
+  | DerivesNode
+  | GivenNode
 
 export interface RefNode {
   readonly type: "ref"
@@ -277,6 +279,18 @@ export interface MemoNode {
   readonly type: "memo"
   readonly name: string
   readonly child: Rule
+}
+
+export interface DerivesNode {
+  readonly type: "derives"
+  readonly entity: AnyTerm
+  readonly from: AnyTerm
+}
+
+export interface GivenNode {
+  readonly type: "given"
+  readonly rule: Rule
+  readonly context: Rule
 }
 
 export const term = <T>(): Term<T> => {
@@ -547,6 +561,28 @@ export const letRule = (name: string, constraint: ConstraintInput): Rule => {
     type: "memo",
     name,
     child: toRule(constraint),
+  }
+}
+
+export const derives = <T>(entity: Term<T>, from: Term<T>): Rule => {
+  const normalizedEntity = normalizeTerm(entity)
+  const normalizedFrom = normalizeTerm(from)
+
+  return {
+    type: "derives",
+    entity: normalizedEntity.root as AnyTerm,
+    from: normalizedFrom.root as AnyTerm,
+  }
+}
+
+export const given = (
+  rule: ConstraintInput,
+  context: ConstraintInput,
+): Rule => {
+  return {
+    type: "given",
+    rule: toRule(rule),
+    context: toRule(context),
   }
 }
 

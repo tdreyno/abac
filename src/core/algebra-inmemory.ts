@@ -86,6 +86,9 @@ const analyzeRule = (rule: Rule): Analysis => {
       case "forall":
         visit(node.child)
         return
+      case "derives":
+      case "given":
+        return
       default: {
         const exhaustive: never = node
         return exhaustive
@@ -148,6 +151,9 @@ const sortAndChildren = (children: Array<Rule>): Array<Rule> => {
       case "and":
       case "or":
         return 5
+      case "derives":
+      case "given":
+        return 4
       default: {
         const exhaustive: never = node
         return exhaustive
@@ -253,6 +259,8 @@ const collectDefinitions = (rule: Rule): Map<string, Rule> => {
       case "eq-term":
       case "eq-value":
       case "ref":
+      case "derives":
+      case "given":
         return
       default: {
         const exhaustive: never = node
@@ -305,6 +313,8 @@ const buildDefinitionEdges = (
         case "term":
         case "eq-term":
         case "eq-value":
+        case "derives":
+        case "given":
           return
         default: {
           const exhaustive: never = node
@@ -338,6 +348,15 @@ const validateRefNames = (rule: Rule, definitions: Map<string, Rule>): void => {
       case "memo":
         visit(node.child)
         return
+      case "derives":
+      case "given": {
+        if (node.type === "derives") {
+          return
+        }
+        visit(node.rule)
+        visit(node.context)
+        return
+      }
       case "relation":
       case "unary":
       case "term":
@@ -556,6 +575,15 @@ const solveRule = async (
       return output
     }
 
+    case "given": {
+      const contextEnvironments = await solveRule(
+        rule.context,
+        environments,
+        state,
+      )
+      return solveRule(rule.rule, contextEnvironments, state)
+    }
+
     case "forall": {
       const output: Array<Environment> = []
 
@@ -646,6 +674,58 @@ const solveRule = async (
       }
 
       return output
+    }
+
+    case "derives": {
+      const output: Array<Environment> = []
+
+      environments.forEach(environment => {
+        const entityBound = hasBinding(environment, rule.entity)
+        const fromBound = hasBinding(environment, rule.from)
+        const entityValue = environment[rule.entity]
+        const fromValue = environment[rule.from]
+
+        if (entityBound && fromBound) {
+          if (Object.is(entityValue, fromValue)) {
+            output.push(environment)
+          }
+          return
+        }
+
+        if (entityBound) {
+          output.push(bindValue(environment, rule.from, entityValue))
+          return
+        }
+
+        if (fromBound) {
+          output.push(bindValue(environment, rule.entity, fromValue))
+          return
+        }
+
+        const candidates = collectCandidates(
+          rule.entity,
+          environment,
+          state.facts,
+          state.analysis,
+          state.globalDomain,
+        )
+        candidates.forEach(candidate => {
+          let next = bindValue(environment, rule.entity, candidate)
+          next = bindValue(next, rule.from, candidate)
+          output.push(next)
+        })
+      })
+
+      return output
+    }
+
+    case "given": {
+      const contextEnvironments = await solveRule(
+        rule.context,
+        environments,
+        state,
+      )
+      return solveRule(rule.rule, contextEnvironments, state)
     }
 
     default: {

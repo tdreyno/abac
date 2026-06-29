@@ -54,3 +54,93 @@ evaluateWithProof returns an EvaluationProof object.
 - ok indicates whether at least one environment matched.
 - rule includes the evaluated rule tree.
 - details is adapter-specific metadata.
+
+## Core Algebra Enhancements
+
+### derives(entity, from)
+
+The `derives()` primitive models transitive relationships between entities. It's useful for:
+
+- **Role hierarchies**: A manager role derives from a member role (inherits member permissions)
+- **Permission delegation**: A delegated permission derives from the original
+- **Entity relationships**: One entity derives from another in a transitive chain
+
+Example:
+
+```typescript
+import { term, derives } from "@tdreyno/he-said"
+
+const user = term<{ id: string; role: string }>()
+const role = term<string>()
+const managerRole = term<string>()
+
+// "user has role via derives from manager role"
+const rule = and(
+  derives(user, managerRole),
+  // ... other constraints
+)
+```
+
+Both in-memory and PostgreSQL adapters support derives automatically:
+
+- **In-memory**: Unifies the two terms via environment matching
+- **PostgreSQL**: Compiles to SQL equality constraints
+
+### given(rule, context)
+
+The `given()` primitive scopes a rule to a context. It's useful for:
+
+- **Workspace/domain scoping**: Rule applies given a workspace context
+- **Time-window scoping**: Rule applies given a time range
+- **Conditional scoping**: Rule applies given a condition is true
+
+Example:
+
+```typescript
+import { term, given, relation } from "@tdreyno/he-said"
+
+const user = term<User>()
+const workspace = term<Workspace>()
+const permission = relation<User, Permission>()
+
+// "user has permission, given they're in the workspace"
+const rule = given(
+  permission(user, readDoc),
+  relation(userBelongsToWorkspace, [user, workspace]),
+)
+```
+
+Both adapters support given automatically:
+
+- **In-memory**: Evaluates context first, then main rule within that context
+- **PostgreSQL**: Compiles context to an EXISTS subquery, ANDed with the main rule
+
+### Pattern-Agnostic
+
+Both `derives()` and `given()` are **pattern-agnostic**. They work equally well for:
+
+- RBAC (role-based access control)
+- ABAC (attribute-based access control)
+- ReBAC (relationship-based access control)
+- Custom authorization patterns
+
+## Higher-Level APIs
+
+While the core algebra is low-level and flexible, he-said provides higher-level APIs for common patterns:
+
+### RBAC Package
+
+For role-based access control, use `@tdreyno/he-said/rbac`:
+
+```typescript
+import { enforcer, resource, role, policy } from "@tdreyno/he-said/rbac"
+
+const post = resource<"post">()
+const admin = role().permission("delete", post)
+const rbac = enforcer(policy([admin], []))
+
+await rbac.roles(admin.id).grant("alice")
+const can = await rbac.enforce("alice", post, "delete")
+```
+
+The RBAC package compiles down to core algebra rules under the hood. See [RBAC Guide](./rbac-guide.md) for more.

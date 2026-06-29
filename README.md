@@ -139,6 +139,41 @@ Use when relation facts are persisted in SQL tables.
 
 `planPostgresRule` can produce diagnostics for join-table index hints, domain coverage for `forAll`, and other planner guidance.
 
+## RBAC Package
+
+For role-based access control, use the dedicated RBAC package:
+
+```typescript
+import { enforcer, resource, role, policy } from "@tdreyno/he-said/rbac"
+
+// Define resources
+const document = resource<"document">()
+
+// Define roles with permissions
+const viewer = role().permission("read", document)
+const editor = role().permission("read", document).permission("write", document)
+const admin = role()
+  .permission("read", document)
+  .permission("write", document)
+  .permission("delete", document)
+
+// Create enforcer
+const rbac = enforcer(policy([viewer, editor, admin], []))
+
+// Assign roles
+await rbac.roles(editor.id).grant("alice")
+
+// Check permissions
+const can = await rbac.enforce("alice", document, "write")
+console.log(can.allowed) // true
+
+// Query and manage
+const alicePerms = await rbac.users("alice").permissions()
+await rbac.roles(editor.id).addPermission("archive", document)
+```
+
+The RBAC package provides a fluent, method-based API perfect for role-based patterns. See the [RBAC Guide](docs/rbac-guide.md) and [API Reference](docs/rbac-api.md) for complete documentation.
+
 ## Documentation
 
 - [Getting Started](docs/getting-started.md)
@@ -146,6 +181,8 @@ Use when relation facts are persisted in SQL tables.
 - [API Documentation](docs/api.md)
 - [In-Memory Evaluation](docs/in-memory-evaluation.md)
 - [Type Safety and Terms](docs/type-safety-and-terms.md)
+- [RBAC Guide](docs/rbac-guide.md)
+- [RBAC API Reference](docs/rbac-api.md)
 - [RBAC Example](docs/rbac-implementation.md)
 - [ACL Example](docs/acl-implementation.md)
 - [ABAC Example](docs/abac-implementation.md)

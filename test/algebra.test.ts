@@ -496,4 +496,190 @@ describe("algebra api", () => {
       'unknown ref "missing"',
     )
   })
+
+  it("supports derives() for transitive entity relationships", async () => {
+    const entity = term<string>()
+    const adapter = createInMemoryAdapter({
+      relations: [],
+      domain: ["a", "b", "c"],
+    })
+    const instance = evaluator(adapter, {
+      evaluatorContext: null,
+    })
+
+    // Test basic derives with two different entities
+    const rule = algebra.derives(entity, entity)
+    await expect(
+      instance.evaluate(rule, {
+        [entity]: "a",
+      }),
+    ).resolves.toBe(true)
+
+    // Test derives with bound entity - should succeed when values match
+    const e1 = term<string>()
+    const e2 = term<string>()
+    const derivesRule = algebra.derives(e1, e2)
+
+    await expect(
+      instance.evaluate(derivesRule, {
+        [e1]: "test",
+        [e2]: "test",
+      }),
+    ).resolves.toBe(true)
+
+    await expect(
+      instance.evaluate(derivesRule, {
+        [e1]: "test",
+        [e2]: "other",
+      }),
+    ).resolves.toBe(false)
+  })
+
+  it("supports given() for contextual rule scoping", async () => {
+    const user = term<User>()
+    const isModerator = term<boolean>()
+
+    const adapter = createInMemoryAdapter({
+      relations: [],
+      domain: [
+        { id: "u1", suspended: false },
+        { id: "u2", suspended: true },
+      ],
+    })
+    const instance = evaluator(adapter, {
+      evaluatorContext: null,
+    })
+
+    const activeUser = user.is(u => !u.suspended)
+    const canRead = eq(isModerator, true)
+
+    // Rule that requires both context (active user) and permission
+    const rule = algebra.given(canRead, activeUser)
+
+    const moderatorActive = await instance.evaluate(rule, {
+      [user]: { id: "u1", suspended: false },
+      [isModerator]: true,
+    })
+    expect(moderatorActive).toBe(true)
+
+    const moderatorSuspended = await instance.evaluate(rule, {
+      [user]: { id: "u2", suspended: true },
+      [isModerator]: true,
+    })
+    expect(moderatorSuspended).toBe(false)
+
+    const nonModeratorActive = await instance.evaluate(rule, {
+      [user]: { id: "u1", suspended: false },
+      [isModerator]: false,
+    })
+    expect(nonModeratorActive).toBe(false)
+  })
+
+  it("supports derives() with relations for role hierarchies", async () => {
+    const role = term<string>()
+    const derivedFrom = relation<string, string>()
+
+    const adapter = createInMemoryAdapter({
+      relations: [
+        {
+          relation: derivedFrom,
+          pairs: [
+            ["admin", "moderator"],
+            ["moderator", "viewer"],
+          ],
+        },
+      ],
+      domain: ["admin", "moderator", "viewer"],
+    })
+    const instance = evaluator(adapter, {
+      evaluatorContext: null,
+    })
+
+    // Admin derives from moderator relation
+    const adminRule = algebra.and(
+      role,
+      derivedFrom(
+        role,
+        term<string>().is(v => v === "moderator"),
+      ),
+    )
+
+    await expect(
+      instance.evaluate(adminRule, {
+        [role]: "admin",
+      }),
+    ).resolves.toBe(true)
+
+    await expect(
+      instance.evaluate(adminRule, {
+        [role]: "viewer",
+      }),
+    ).resolves.toBe(false)
+  })
+
+  it("combines derives() and given() for complex authorization", async () => {
+    const user = term<User>()
+    const role = term<string>()
+    const permission = term<string>()
+    const roleDerivation = relation<string, string>()
+
+    const adapter = createInMemoryAdapter({
+      relations: [
+        {
+          relation: roleDerivation,
+          pairs: [
+            ["admin", "editor"],
+            ["editor", "viewer"],
+          ],
+        },
+      ],
+      domain: [
+        { id: "u1", suspended: false },
+        { id: "u2", suspended: true },
+      ],
+    })
+    const instance = evaluator(adapter, {
+      evaluatorContext: null,
+    })
+
+    const activeUser = user.is(u => !u.suspended)
+    const hasPermission = eq(permission, "read")
+    const isInRole = algebra.and(
+      role,
+      roleDerivation(
+        role,
+        term<string>().is(v => v === "editor"),
+      ),
+    )
+
+    // Complex rule: user must be active AND have the permission AND be in an admin/editor role
+    const complexRule = algebra.given(
+      algebra.and(hasPermission, isInRole),
+      activeUser,
+    )
+
+    await expect(
+      instance.evaluate(complexRule, {
+        [user]: { id: "u1", suspended: false },
+        [permission]: "read",
+        [role]: "admin",
+      }),
+    ).resolves.toBe(true)
+
+    await expect(
+      instance.evaluate(complexRule, {
+        [user]: { id: "u2", suspended: true },
+        [permission]: "read",
+        [role]: "admin",
+      }),
+    ).resolves.toBe(false)
+
+    await expect(
+      instance.evaluate(complexRule, {
+        [user]: { id: "u1", suspended: false },
+        [permission]: "write",
+        [role]: "admin",
+      }),
+    ).resolves.toBe(false)
+  })
 })

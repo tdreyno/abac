@@ -18,6 +18,8 @@ export {
   distinct,
   letRule,
   evaluator,
+  derives,
+  given,
 } from "./core/algebra"
 export {
   createInMemoryAdapter,
