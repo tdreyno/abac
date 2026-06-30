@@ -17,7 +17,7 @@ import {
   term,
   through,
   validateStratifiedNegation,
-} from "../src"
+} from ".."
 
 type User = { id: string; suspended: boolean }
 type Team = { id: string }

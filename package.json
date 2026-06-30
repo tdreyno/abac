@@ -17,6 +17,10 @@
     "./rbac": {
       "types": "./dist/rbac/index.d.ts",
       "default": "./dist/rbac/index.js"
+    },
+    "./abac": {
+      "types": "./dist/abac/index.d.ts",
+      "default": "./dist/abac/index.js"
     }
   },
   "files": [
@@ -35,7 +39,7 @@
     "postgres:test:down": "docker compose -f docker-compose.postgres.yml down --remove-orphans",
     "test": "jest --runInBand",
     "test:ci": "jest --runInBand --coverage",
-    "test:postgres": "jest --runInBand test/algebra-postgres.integration.test.ts",
+    "test:postgres": "jest --runInBand src/core/algebra-postgres.integration.test.ts",
     "test:postgres:ci": "npm run postgres:test:up && npm run test:postgres; npm run postgres:test:down",
     "test:types": "tsc -p tsconfig.types.json --noEmit",
     "release": "npm run build && npm run lint && npm run test:ci && npm run test:types && changeset version && changeset publish"

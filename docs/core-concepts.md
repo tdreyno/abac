@@ -144,3 +144,43 @@ const can = await rbac.enforce("alice", post, "delete")
 ```
 
 The RBAC package compiles down to core algebra rules under the hood. See [RBAC Guide](./rbac-guide.md) for more.
+
+### ABAC Package
+
+For attribute-based access control, use `@tdreyno/he-said/abac`:
+
+```typescript
+import {
+  action,
+  actionIs,
+  approve,
+  deny,
+  enforcer,
+  eq,
+  ge,
+  policy,
+} from "@tdreyno/he-said/abac"
+
+const READ = action("read")
+
+const denySuspended = deny(eq((user: User) => user.suspended, true))
+
+const approveRead = approve([
+  actionIs(READ),
+  eq(
+    (user: User) => user.department,
+    (resource: Document) => resource.department,
+  ),
+  ge(
+    (user: User) => user.clearance,
+    (resource: Document) => resource.sensitivity,
+  ),
+])
+
+const abac = enforcer(policy(denySuspended, approveRead))
+const result = await abac.can(READ, { user, resource: document, environment })
+```
+
+The ABAC package compiles to core algebra constraints while keeping policy authoring focused on approve/deny rules, action identity tokens, and reusable failure metadata.
+
+See [ABAC Guide](./abac-guide.md) and [ABAC API](./abac-api.md) for full details.

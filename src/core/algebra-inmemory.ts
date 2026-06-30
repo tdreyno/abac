@@ -1,4 +1,5 @@
 import {
+  buildEvaluationProofDetails,
   type Environment,
   type EvaluationProof,
   type EvaluatorAdapter,
@@ -866,6 +867,7 @@ export const createInMemoryAdapter = <
         ok: matches.length > 0,
         rule,
         details: {
+          ...buildEvaluationProofDetails(rule, matches.length > 0),
           matchCount: matches.length,
           ...counters,
         },

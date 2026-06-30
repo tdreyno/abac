@@ -10,7 +10,7 @@ import {
   or,
   relation,
   term,
-} from "../src"
+} from ".."
 
 const postgresConfig = {
   host: process.env.POSTGRES_HOST ?? "127.0.0.1",

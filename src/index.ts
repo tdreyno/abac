@@ -17,6 +17,11 @@ export {
   select,
   distinct,
   letRule,
+  annotateRule,
+  buildEvaluationProofDetails,
+  getRuleAnnotations,
+  getTermInfo,
+  withExclusions,
   evaluator,
   derives,
   given,
@@ -31,12 +36,18 @@ export {
 } from "./core/algebra-postgres"
 export type {
   Environment,
+  EvaluationProofDetails,
   EvaluationProof,
   EvaluatorAdapter,
   EvaluatorInstance,
+  OutcomeToken,
   Relation,
+  RuleAnnotations,
+  RuleBranchOutcome,
+  RuleReferenceToken,
   Rule,
   Term,
+  TermInfo,
   UnaryPredicate,
 } from "./core/algebra"
 export type {

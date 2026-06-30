@@ -191,6 +191,20 @@ export interface Relation<Left, Right> {
 
 export type ConstraintInput = Rule | AnyTerm
 
+export type RuleReferenceToken = symbol & {
+  readonly __ruleReferenceBrand?: true
+}
+
+export type OutcomeToken = symbol & {
+  readonly __outcomeTokenBrand?: true
+}
+
+export interface RuleAnnotations {
+  readonly label?: string
+  readonly referenceToken?: RuleReferenceToken
+  readonly outcomeToken?: OutcomeToken
+}
+
 export type Rule =
   | RelationNode
   | UnaryNode
@@ -293,6 +307,39 @@ export interface GivenNode {
   readonly context: Rule
 }
 
+const ruleAnnotations = new WeakMap<Rule, RuleAnnotations>()
+
+export const annotateRule = <TRule extends Rule>(
+  rule: TRule,
+  annotations: RuleAnnotations,
+): TRule => {
+  const existing = ruleAnnotations.get(rule)
+  ruleAnnotations.set(rule, {
+    ...(existing ?? {}),
+    ...annotations,
+  })
+  return rule
+}
+
+export const getRuleAnnotations = (rule: Rule): RuleAnnotations | undefined => {
+  return ruleAnnotations.get(rule)
+}
+
+export interface TermInfo<T> {
+  readonly root: Term<T>
+  readonly predicates: Array<UnaryPredicate<T>>
+  readonly predicateCount: number
+}
+
+export const getTermInfo = <T>(value: Term<T>): TermInfo<T> => {
+  const normalized = normalizeTerm(value)
+  return {
+    root: normalized.root,
+    predicates: normalized.predicates,
+    predicateCount: normalized.predicates.length,
+  }
+}
+
 export const term = <T>(): Term<T> => {
   const value = Symbol("rules.term") as Term<T>
   registerBaseTerm(value)
@@ -380,6 +427,19 @@ export const and = (...constraints: Array<ConstraintInput>): Rule => {
     type: "and",
     children: flattenByType("and", constraints.map(toRule)),
   }
+}
+
+export const withExclusions = (
+  exclusions: Array<ConstraintInput>,
+  candidates: Array<ConstraintInput>,
+): Rule => {
+  const candidateRule = candidates.length === 0 ? or() : or(...candidates)
+
+  if (exclusions.length === 0) {
+    return candidateRule
+  }
+
+  return and(not(or(...exclusions)), candidateRule)
 }
 
 export const or = (...constraints: Array<ConstraintInput>): Rule => {
@@ -589,7 +649,49 @@ export const given = (
 export interface EvaluationProof {
   readonly ok: boolean
   readonly rule: Rule
-  readonly details?: Record<string, unknown>
+  readonly details?: EvaluationProofDetails
+}
+
+export interface RuleBranchOutcome {
+  readonly referenceToken?: RuleReferenceToken
+  readonly matched: boolean
+  readonly label?: string
+}
+
+export interface EvaluationProofDetails {
+  readonly branchOutcomes?: Array<RuleBranchOutcome>
+  readonly matchedReferenceTokens?: Array<RuleReferenceToken>
+  readonly diagnostics?: ReadonlyArray<unknown>
+  readonly [key: string]: unknown
+}
+
+export const buildEvaluationProofDetails = (
+  rule: Rule,
+  matched: boolean,
+): EvaluationProofDetails => {
+  const annotations = getRuleAnnotations(rule)
+
+  if (!annotations) {
+    return {
+      branchOutcomes: [
+        {
+          matched,
+        },
+      ],
+    }
+  }
+
+  return {
+    branchOutcomes: [
+      {
+        matched,
+        label: annotations.label,
+        referenceToken: annotations.referenceToken,
+      },
+    ],
+    matchedReferenceTokens:
+      matched && annotations.referenceToken ? [annotations.referenceToken] : [],
+  }
 }
 
 export interface EvaluatorAdapter<Env extends Environment, EvaluatorContext> {
@@ -637,7 +739,11 @@ export const evaluator = <Env extends Environment, EvaluatorContext>(
         environment,
         options.evaluatorContext,
       )
-      return { ok, rule }
+      return {
+        ok,
+        rule,
+        details: buildEvaluationProofDetails(rule, ok),
+      }
     },
   }
 }

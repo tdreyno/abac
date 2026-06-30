@@ -6,7 +6,7 @@
  * structures like team member -> team lead -> manager -> director.
  */
 
-import { enforcer, resource, role, policy } from "../../src/rbac"
+import { enforcer, resource, role, policy } from "../index"
 
 async function main() {
   console.log("=== Role Hierarchy Example ===\n")

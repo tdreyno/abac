@@ -174,6 +174,76 @@ await rbac.roles(editor.id).addPermission("archive", document)
 
 The RBAC package provides a fluent, method-based API perfect for role-based patterns. See the [RBAC Guide](docs/rbac-guide.md) and [API Reference](docs/rbac-api.md) for complete documentation.
 
+## ABAC Package
+
+For attribute-based access control, use `@tdreyno/he-said/abac`:
+
+```typescript
+import {
+  action,
+  actionIs,
+  approve,
+  deny,
+  enforcer,
+  eq,
+  eqEnv,
+  failure,
+  ge,
+  policy,
+} from "@tdreyno/he-said/abac"
+
+type User = {
+  id: string
+  department: string
+  clearance: number
+  suspended: boolean
+}
+
+type Document = {
+  ownerId: string
+  department: string
+  sensitivity: number
+}
+
+type Environment = {
+  isBusinessHours: boolean
+}
+
+const READ = action("read")
+const RULE_DENY_SUSPENDED = failure("Suspended users cannot access documents.")
+
+const denySuspended = deny(
+  eq((user: User) => user.suspended, true),
+  {
+    failure: RULE_DENY_SUSPENDED,
+  },
+)
+
+const approveRead = approve([
+  actionIs<User, Document, Environment>(READ),
+  eq(
+    (user: User) => user.department,
+    (resource: Document) => resource.department,
+  ),
+  ge(
+    (user: User) => user.clearance,
+    (resource: Document) => resource.sensitivity,
+  ),
+])
+
+const abac = enforcer(policy(denySuspended, approveRead))
+
+const can = await abac.can(READ, {
+  user,
+  resource: document,
+  environment,
+})
+
+console.log(can.allowed)
+```
+
+The ABAC package provides a rule-focused API with action identity tokens, deny/approve precedence, reusable failure tokens, and traceable rule references.
+
 ## Documentation
 
 - [Getting Started](docs/getting-started.md)
@@ -183,6 +253,8 @@ The RBAC package provides a fluent, method-based API perfect for role-based patt
 - [Type Safety and Terms](docs/type-safety-and-terms.md)
 - [RBAC Guide](docs/rbac-guide.md)
 - [RBAC API Reference](docs/rbac-api.md)
+- [ABAC Guide](docs/abac-guide.md)
+- [ABAC API Reference](docs/abac-api.md)
 - [RBAC Example](docs/rbac-implementation.md)
 - [ACL Example](docs/acl-implementation.md)
 - [ABAC Example](docs/abac-implementation.md)

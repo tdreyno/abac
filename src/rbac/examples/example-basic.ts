@@ -8,7 +8,7 @@
  * - Check permissions in your application
  */
 
-import { enforcer, resource, role, policy } from "../../src/rbac"
+import { enforcer, resource, role, policy } from "../index"
 
 async function main() {
   console.log("=== Basic RBAC Example ===\n")

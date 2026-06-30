@@ -38,7 +38,7 @@ If one side is not bound in the current environment, evaluation may bind it.
 
 ## Compile-Time Assertions
 
-This repository includes compile-time type tests in test/algebra.typecheck.ts.
+This repository includes compile-time type tests in src/core/algebra.typecheck.ts.
 
 Run:
 

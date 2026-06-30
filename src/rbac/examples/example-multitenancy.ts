@@ -8,7 +8,7 @@
  * The approach is to scope user and resource IDs by tenant.
  */
 
-import { enforcer, resource, role, policy } from "../../src/rbac"
+import { enforcer, resource, role, policy } from "../index"
 
 async function main() {
   console.log("=== Multi-Tenant RBAC Example ===\n")

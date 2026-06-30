@@ -9,7 +9,7 @@ import {
   relation,
   term,
   type Environment,
-} from "../src"
+} from ".."
 
 type User = { id: string; suspended: boolean }
 type Team = { id: string }

@@ -9,8 +9,8 @@ import {
   planPostgresRule,
   relation,
   term,
-} from "../src"
-import type { PostgresQueryResult } from "../src"
+} from ".."
+import type { PostgresQueryResult } from ".."
 
 const queryResult = <Row extends Record<string, unknown>>(
   rows: ReadonlyArray<Row>,

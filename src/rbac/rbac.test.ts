@@ -1,4 +1,4 @@
-import { enforcer, resource, role, policy } from "../src/rbac"
+import { enforcer, resource, role, policy } from "./index"
 
 describe("RBAC enforcer", () => {
   it("checks basic permissions", async () => {

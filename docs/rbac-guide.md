@@ -373,4 +373,4 @@ Always check `.allowed` before granting access.
 
 - See [RBAC API Reference](./rbac-api.md) for complete method documentation
 - Check [Core Concepts](./core-concepts.md) to learn about the underlying algebra system
-- View [Working Examples](../examples/rbac/) for full, runnable code
+- View [Working Examples](../src/rbac/examples/) for full, runnable code
