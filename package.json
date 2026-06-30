@@ -14,6 +14,10 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./she-said": {
+      "types": "./dist/she-said.d.ts",
+      "default": "./dist/she-said.js"
+    },
     "./rbac": {
       "types": "./dist/rbac/index.d.ts",
       "default": "./dist/rbac/index.js"
