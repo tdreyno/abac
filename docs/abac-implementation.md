@@ -1,5 +1,9 @@
 # Implementing ABAC
 
+This is the conceptual/core-algebra ABAC implementation guide.
+For the dedicated ABAC facade package, see [ABAC Guide](./abac-guide.md) and [ABAC API](./abac-api.md).
+If you're starting from scratch, prefer `@tdreyno/he-said/abac` and use this page when you need the underlying attribute-based model.
+
 This guide shows a simple, real-world ABAC model in he-said.
 
 Scenario:

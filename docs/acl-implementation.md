@@ -2,6 +2,7 @@
 
 This is the conceptual/core-algebra ACL implementation guide.
 For the dedicated ACL facade package, see [ACL Guide](./acl-guide.md) and [ACL API Reference](./acl-api.md).
+If you're starting from scratch, prefer `@tdreyno/he-said/acl` and use this page when you need the underlying relation-backed model.
 
 This guide shows a simple, real-world ACL model in he-said.
 

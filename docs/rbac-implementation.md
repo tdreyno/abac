@@ -1,5 +1,9 @@
 # Implementing RBAC
 
+This is the conceptual/core-algebra RBAC implementation guide.
+For the dedicated RBAC facade package, see [RBAC Guide](./rbac-guide.md) and [RBAC API Reference](./rbac-api.md).
+If you're starting from scratch, prefer `@tdreyno/he-said/rbac` and use this page when you need the underlying relation-based model.
+
 This guide shows a simple, real-world RBAC model in he-said.
 
 Scenario:
