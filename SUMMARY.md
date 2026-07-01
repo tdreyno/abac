@@ -14,6 +14,8 @@
 - [ABAC API](docs/abac-api.md)
 - [ACL Guide](docs/acl-guide.md)
 - [ACL API](docs/acl-api.md)
+- [CASL Comparison](docs/casl-comparison.md)
+- [CASL Migration Guide](docs/casl-migration-guide.md)
 
 ## Conceptual / From Scratch
 

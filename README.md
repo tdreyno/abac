@@ -331,6 +331,8 @@ The ABAC package provides a rule-focused API with action identity tokens, deny/a
 - [ACL API Reference](docs/acl-api.md)
 - [ABAC Guide](docs/abac-guide.md)
 - [ABAC API Reference](docs/abac-api.md)
+- [CASL Comparison](docs/casl-comparison.md)
+- [CASL Migration Guide](docs/casl-migration-guide.md)
 - [RBAC Example](docs/rbac-implementation.md)
 - [ACL Example](docs/acl-implementation.md)
 - [ABAC Example](docs/abac-implementation.md)
