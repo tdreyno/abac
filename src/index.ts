@@ -33,10 +33,12 @@ export {
 } from "./core/algebra-inmemory"
 export {
   createPostgresAdapter,
+  planPostgresPredicate,
   planPostgresRule,
 } from "./core/algebra-postgres"
 export type {
   Environment,
+  FilterOptions,
   EvaluationProofDetails,
   EvaluationProof,
   EvaluatorAdapter,
@@ -57,6 +59,7 @@ export type {
 } from "./core/algebra-inmemory"
 export type {
   PlannedPostgresRule,
+  PlannedPostgresPredicate,
   PostgresAdapterOptions,
   PostgresEdgeRelationSource,
   PostgresJoinTableRelationSource,
@@ -68,4 +71,5 @@ export type {
   PostgresTermEncoder,
   PostgresTermEncoding,
   PostgresTermDomainSource,
+  PostgresTermSqlBinding,
 } from "./core/algebra-postgres"

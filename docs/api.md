@@ -32,6 +32,7 @@ Returns an EvaluatorInstance with:
 
 - evaluate(rule, environment): Promise<boolean>
 - evaluateWithProof(rule, environment): Promise<EvaluationProof>
+- filter(rule, { environment, term, candidates? }): Promise<ReadonlyArray<T>>
 
 ### In-Memory Adapter
 
@@ -52,6 +53,7 @@ InMemoryAdapterOptions:
 - UnaryPredicate<T, Env>
 - EvaluatorAdapter<Env, EvaluatorContext>
 - EvaluatorInstance<Env>
+- FilterOptions<Env, T>
 - EvaluationProof
 - InMemoryRelationFacts<Left, Right>
 - InMemoryAdapterOptions

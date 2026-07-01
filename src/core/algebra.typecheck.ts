@@ -61,3 +61,12 @@ instance.evaluate(baseRule, {
   [viewer]: { id: "u1", suspended: false },
   [tenant]: "acme",
 })
+
+instance.filter(baseRule, {
+  environment: {
+    [viewer]: { id: "u1", suspended: false },
+    [tenant]: "acme",
+  },
+  term: team,
+  candidates: [{ id: "t1" }],
+})

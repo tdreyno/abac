@@ -136,6 +136,7 @@ Evaluator:
 - `evaluator(adapter, { evaluatorContext })`
 - `instance.evaluate(rule, environment)`
 - `instance.evaluateWithProof(rule, environment)`
+- `instance.filter(rule, { environment, term, candidates? })`
 
 ## Common Building Blocks
 
@@ -161,8 +162,10 @@ Use when relation facts are persisted in SQL tables.
 
 - `createPostgresAdapter({ relationMappings, queryExecutor, ... })`
 - `planPostgresRule(rule, { relationMappings, environment, ... })`
+- `planPostgresPredicate(rule, { relationMappings, environment, bindings?, ... })`
 
 `planPostgresRule` can produce diagnostics for join-table index hints, domain coverage for `forAll`, and other planner guidance.
+`planPostgresPredicate` returns a parameterized `EXISTS(...)` fragment for composing authorization constraints into caller-owned `WHERE` clauses.
 
 ## RBAC Package
 

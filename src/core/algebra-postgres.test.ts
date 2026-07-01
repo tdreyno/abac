@@ -6,6 +6,7 @@ import {
   forAll,
   not,
   or,
+  planPostgresPredicate,
   planPostgresRule,
   relation,
   term,
@@ -184,6 +185,35 @@ describe("postgres algebra adapter", () => {
     expect(plan.params).toHaveLength(2)
   })
 
+  it("plans a composable predicate fragment", () => {
+    const actor = term<{ id: string }>()
+    const workspace = term<{ id: string }>()
+    const userInWorkspace = relation<{ id: string }, { id: string }>()
+
+    const plan = planPostgresPredicate(userInWorkspace(actor, workspace), {
+      relationMappings: [
+        {
+          relation: userInWorkspace,
+          source: {
+            kind: "join-table",
+            table: "workspace_memberships",
+            leftColumn: "user_id",
+            rightColumn: "workspace_id",
+          },
+        },
+      ],
+      termEncodings: [{ term: actor, encode: encodeId }],
+      environment: {
+        [actor]: { id: "u1" },
+      },
+      bindings: [{ term: workspace, sql: '"documents"."workspace_id"' }],
+    })
+
+    expect(plan.sql).toContain("EXISTS(")
+    expect(plan.sql).not.toContain("SELECT EXISTS")
+    expect(plan.params).toEqual(["u1"])
+  })
+
   it("returns proof details with diagnostics", async () => {
     const actor = term<{ id: string }>()
     const workspace = term<{ id: string }>()
@@ -235,6 +265,51 @@ describe("postgres algebra adapter", () => {
         ]),
       }),
     )
+  })
+
+  it("filters explicit candidates in one postgres round trip", async () => {
+    const actor = term<{ id: string }>()
+    const workspace = term<string>()
+    const userInWorkspace = relation<{ id: string }, string>()
+
+    const captured: Array<{ sql: string; params: ReadonlyArray<unknown> }> = []
+    const adapter = createPostgresAdapter({
+      relationMappings: [
+        {
+          relation: userInWorkspace,
+          source: {
+            kind: "join-table",
+            table: "workspace_memberships",
+            leftColumn: "user_id",
+            rightColumn: "workspace_id",
+          },
+        },
+      ],
+      termEncodings: [{ term: actor, encode: encodeId }],
+      queryExecutor: {
+        query: async <Row extends Record<string, unknown>>(
+          sql: string,
+          params: ReadonlyArray<unknown>,
+        ) => {
+          captured.push({ sql, params })
+          return queryResult([{ candidate: "w1" } as unknown as Row])
+        },
+      },
+    })
+
+    const allowed = await adapter.filter?.(
+      userInWorkspace(actor, workspace),
+      {
+        environment: { [actor]: { id: "u1" } },
+        term: workspace,
+        candidates: ["w1", "w2"],
+      },
+      null,
+    )
+
+    expect(allowed).toEqual(["w1"])
+    expect(captured).toHaveLength(1)
+    expect(captured[0]?.sql).toContain("VALUES")
   })
 
   it("encodes bound object terms and eq values through configured term encodings", () => {

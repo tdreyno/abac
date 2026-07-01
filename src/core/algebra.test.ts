@@ -263,6 +263,37 @@ describe("algebra api", () => {
     ).resolves.toBe(false)
   })
 
+  it("filters candidate subsets with in-memory adapter", async () => {
+    const viewer = term<User>()
+    const document = term<Document>()
+    const userOwnsDocument = relation<User, Document>()
+
+    const u1 = { id: "u1", suspended: false } satisfies User
+    const d1 = { id: "d1", archived: false } satisfies Document
+    const d2 = { id: "d2", archived: false } satisfies Document
+
+    const adapter = createInMemoryAdapter({
+      relations: [
+        {
+          relation: userOwnsDocument,
+          pairs: [[u1, d1]],
+        },
+      ],
+      domain: [u1, d1, d2],
+    })
+    const instance = evaluator(adapter, {
+      evaluatorContext: null,
+    })
+
+    const allowed = await instance.filter(userOwnsDocument(viewer, document), {
+      environment: { [viewer]: u1 },
+      term: document,
+      candidates: [d1, d2],
+    })
+
+    expect(allowed).toEqual([d1])
+  })
+
   it("supports cardinality helpers", async () => {
     const a = term<boolean>()
     const b = term<boolean>()
