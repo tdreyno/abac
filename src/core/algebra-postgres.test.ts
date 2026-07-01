@@ -184,6 +184,82 @@ describe("postgres algebra adapter", () => {
     expect(plan.params).toHaveLength(2)
   })
 
+  it("plans typed relation predicates as parameterized SQL", () => {
+    const actor = term<{ id: string }>()
+    const team = term<{ id: string }>()
+    const userEditsTeam = relation<{ id: string }, { id: string }>()
+
+    const plan = planPostgresRule(userEditsTeam(actor, team), {
+      relationMappings: [
+        {
+          relation: userEditsTeam,
+          source: {
+            kind: "join-table",
+            table: "team_members",
+            leftColumn: "user_id",
+            rightColumn: "team_id",
+            predicates: [
+              { column: "status", op: "eq", value: "active" },
+              { column: "workspace_id", op: "in", values: ["w1", "w2"] },
+            ],
+          },
+        },
+      ],
+      termEncodings: [
+        { term: actor, encode: encodeId },
+        { term: team, encode: encodeId },
+      ],
+      environment: {
+        [actor]: { id: "u1" },
+        [team]: { id: "t1" },
+      },
+    })
+
+    expect(plan.sql).toContain('"rel1"."status" IS NOT DISTINCT FROM $3')
+    expect(plan.sql).toContain('"rel1"."workspace_id" = ANY($4)')
+    expect(plan.params).toEqual(["u1", "t1", "active", ["w1", "w2"]])
+  })
+
+  it("supports ordered rank comparisons for typed predicates", () => {
+    const actor = term<{ id: string }>()
+    const team = term<{ id: string }>()
+    const userEditsTeam = relation<{ id: string }, { id: string }>()
+
+    const plan = planPostgresRule(userEditsTeam(actor, team), {
+      relationMappings: [
+        {
+          relation: userEditsTeam,
+          source: {
+            kind: "join-table",
+            table: "team_members",
+            leftColumn: "user_id",
+            rightColumn: "team_id",
+            predicates: [{ column: "role", op: "ge", value: "editor" }],
+            orderings: [
+              {
+                column: "role",
+                order: { viewer: 10, editor: 20, admin: 30, owner: 40 },
+              },
+            ],
+          },
+        },
+      ],
+      termEncodings: [
+        { term: actor, encode: encodeId },
+        { term: team, encode: encodeId },
+      ],
+      environment: {
+        [actor]: { id: "u1" },
+        [team]: { id: "t1" },
+      },
+    })
+
+    expect(plan.sql).toContain("(CASE")
+    expect(plan.sql).toContain("WHEN 'viewer' THEN 10")
+    expect(plan.sql).toContain(">= $3")
+    expect(plan.params).toEqual(["u1", "t1", 20])
+  })
+
   it("returns proof details with diagnostics", async () => {
     const actor = term<{ id: string }>()
     const workspace = term<{ id: string }>()

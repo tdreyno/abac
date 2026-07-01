@@ -42,6 +42,21 @@ InMemoryAdapterOptions:
 
 - relations: array of { relation, pairs }
 - domain: optional fallback candidate domain
+- relation entries may also include:
+  - rows: array of { left, right, columns? }
+  - predicates: typed filters (`eq`, `in`, `gt`, `ge`, `lt`, `le`)
+  - orderings: per-column rank maps for ordered comparisons
+
+### Postgres Adapter
+
+- createPostgresAdapter(options)
+- planPostgresRule(rule, options)
+
+Postgres relation/domain sources support:
+
+- staticFilters (legacy SQL snippets)
+- predicates (typed, parameterized source predicates)
+- orderings (per-column rank maps for enum/string thresholds)
 
 ## Key Types
 
@@ -54,7 +69,12 @@ InMemoryAdapterOptions:
 - EvaluatorInstance<Env>
 - EvaluationProof
 - InMemoryRelationFacts<Left, Right>
+- InMemoryRelationRow<Left, Right>
 - InMemoryAdapterOptions
+- SourcePredicate
+- SourceOrdering
+- PostgresSourcePredicate (adapter alias of SourcePredicate)
+- PostgresSourceOrdering (adapter alias of SourceOrdering)
 
 ## Rule Notes
 

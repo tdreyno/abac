@@ -111,6 +111,66 @@ describe("algebra api", () => {
     expect(allowedArchived).toBe(true)
   })
 
+  it("supports typed relation predicates with rank ordering in the in-memory adapter", async () => {
+    const user = term<{ id: string }>()
+    const team = term<{ id: string }>()
+    const userEditsTeam = relation<{ id: string }, { id: string }>()
+
+    const u1 = { id: "u1", suspended: false } satisfies User
+    const u2 = { id: "u2", suspended: false } satisfies User
+    const t1 = { id: "t1" } satisfies Team
+
+    const adapter = createInMemoryAdapter({
+      relations: [
+        {
+          relation: userEditsTeam,
+          pairs: [],
+          rows: [
+            {
+              left: u1,
+              right: t1,
+              columns: { role: "editor", status: "active" },
+            },
+            {
+              left: u2,
+              right: t1,
+              columns: { role: "viewer", status: "active" },
+            },
+          ],
+          predicates: [
+            { column: "status", op: "eq", value: "active" },
+            { column: "role", op: "ge", value: "editor" },
+          ],
+          orderings: [
+            {
+              column: "role",
+              order: { viewer: 10, editor: 20, admin: 30, owner: 40 },
+            },
+          ],
+        },
+      ],
+      domain: [u1, u2, t1],
+    })
+
+    const instance = evaluator(adapter, {
+      evaluatorContext: null,
+    })
+
+    await expect(
+      instance.evaluate(userEditsTeam(user, team), {
+        [user]: u1,
+        [team]: t1,
+      }),
+    ).resolves.toBe(true)
+
+    await expect(
+      instance.evaluate(userEditsTeam(user, team), {
+        [user]: u2,
+        [team]: t1,
+      }),
+    ).resolves.toBe(false)
+  })
+
   it("throws when letRule name is blank", () => {
     const value = term<string>()
 

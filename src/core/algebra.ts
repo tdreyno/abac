@@ -14,6 +14,25 @@ export type UnaryPredicate<T, Env extends Environment = Environment> = (
   environment: Readonly<Env>,
 ) => MaybePromise<boolean>
 
+export type SourceComparisonOperator = "eq" | "gt" | "ge" | "lt" | "le"
+
+export type SourcePredicate =
+  | {
+      column: string
+      op: "in"
+      values: ReadonlyArray<unknown>
+    }
+  | {
+      column: string
+      op: SourceComparisonOperator
+      value: unknown
+    }
+
+export type SourceOrdering = {
+  column: string
+  order: Readonly<Record<string, number>>
+}
+
 type AnyTerm = Term<unknown>
 type AnyUnaryPredicate = UnaryPredicate<unknown, Environment>
 

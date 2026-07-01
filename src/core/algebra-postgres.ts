@@ -4,6 +4,9 @@ import {
   type EvaluatorAdapter,
   type Relation,
   type Rule,
+  type SourceComparisonOperator,
+  type SourceOrdering,
+  type SourcePredicate,
   type Term,
 } from "./algebra"
 
@@ -11,6 +14,10 @@ type PostgresSourceFilter = {
   sql: string
   params?: ReadonlyArray<unknown>
 }
+
+export type PostgresSourceComparisonOperator = SourceComparisonOperator
+export type PostgresSourcePredicate = SourcePredicate
+export type PostgresSourceOrdering = SourceOrdering
 
 type PostgresSuggestedIndex = {
   columns: ReadonlyArray<string>
@@ -22,6 +29,8 @@ type PostgresRelationSourceBase = {
   leftColumn: string
   rightColumn: string
   staticFilters?: ReadonlyArray<PostgresSourceFilter>
+  predicates?: ReadonlyArray<PostgresSourcePredicate>
+  orderings?: ReadonlyArray<PostgresSourceOrdering>
   suggestedIndexes?: ReadonlyArray<PostgresSuggestedIndex>
 }
 
@@ -66,6 +75,8 @@ type PostgresTermDomainSourceBase = {
   table: string
   valueColumn: string
   staticFilters?: ReadonlyArray<PostgresSourceFilter>
+  predicates?: ReadonlyArray<PostgresSourcePredicate>
+  orderings?: ReadonlyArray<PostgresSourceOrdering>
 }
 
 export type PostgresTermDomainSource<T> = PostgresTermDomainSourceBase & {
@@ -194,6 +205,44 @@ const applyFilterAlias = (sql: string, alias: string): string => {
   return sql.split("{{source}}").join(alias)
 }
 
+const findOrderingForColumn = (
+  column: string,
+  orderings?: ReadonlyArray<PostgresSourceOrdering>,
+): PostgresSourceOrdering | undefined => {
+  return orderings?.find(ordering => ordering.column === column)
+}
+
+const renderOrderedColumnSql = (
+  columnSql: string,
+  ordering: PostgresSourceOrdering,
+): string => {
+  const quoteLiteral = (value: string): string => {
+    return `'${value.split("'").join("''")}'`
+  }
+  const clauses = Object.entries(ordering.order)
+    .map(([value, rank]) => `WHEN ${quoteLiteral(value)} THEN ${rank}`)
+    .join(" ")
+
+  return `(CASE ${columnSql} ${clauses} ELSE NULL END)`
+}
+
+const resolvePredicateValue = (
+  predicate: { column: string; value: unknown },
+  ordering?: PostgresSourceOrdering,
+): unknown => {
+  if (ordering) {
+    if (typeof predicate.value !== "string") {
+      throw new Error(
+        `ordered comparison predicate for "${predicate.column}" requires a string value`,
+      )
+    }
+
+    return ordering.order[predicate.value] ?? null
+  }
+
+  return predicate.value
+}
+
 type UnsupportedPostgresRule = Extract<Rule, { type: "term" | "unary" }>
 
 const sortAndChildren = (children: ReadonlyArray<Rule>): Array<Rule> => {
@@ -282,7 +331,10 @@ const addSourceDiagnostics = (
   }
 
   const compositeIndex = `(${quoteIdentifier(source.leftColumn)}, ${quoteIdentifier(source.rightColumn)})`
-  const missingIndexRecommendation = source.staticFilters?.length
+  const hasSourceFilters =
+    (source.staticFilters?.length ?? 0) > 0 ||
+    (source.predicates?.length ?? 0) > 0
+  const missingIndexRecommendation = hasSourceFilters
     ? `Consider a partial index on ${quoteQualifiedIdentifier(source.table)} ${compositeIndex} with the join-table filter predicate.`
     : `Consider a composite index on ${quoteQualifiedIdentifier(source.table)} ${compositeIndex}.`
 
@@ -297,8 +349,7 @@ const addSourceDiagnostics = (
 
   if (
     source.recommendedView &&
-    ((source.staticFilters?.length ?? 0) > 0 ||
-      Object.keys(source.metadataColumns ?? {}).length > 0)
+    (hasSourceFilters || Object.keys(source.metadataColumns ?? {}).length > 0)
   ) {
     state.diagnostics.push({
       level: "info",
@@ -372,14 +423,14 @@ const appendRelation = (
     builder.columns.set(rule.right, rightSql)
   }
 
-  source.staticFilters?.forEach(filter => {
-    builder.whereClauses.push(
-      applyFilterAlias(filter.sql, quoteIdentifier(alias)),
-    )
-    filter.params?.forEach(value => {
-      nextParam(state, value)
-    })
-  })
+  appendStaticFilters(builder, state, alias, source.staticFilters)
+  appendSourcePredicates(
+    builder,
+    state,
+    alias,
+    source.predicates,
+    source.orderings,
+  )
 
   state.sources.push({
     relationId: rule.relationId,
@@ -449,6 +500,46 @@ const appendStaticFilters = (
     filter.params?.forEach(value => {
       nextParam(state, value)
     })
+  })
+}
+
+const appendSourcePredicates = (
+  builder: QueryBuilder,
+  state: PlannerState,
+  alias: string,
+  predicates?: ReadonlyArray<PostgresSourcePredicate>,
+  orderings?: ReadonlyArray<PostgresSourceOrdering>,
+): void => {
+  predicates?.forEach(predicate => {
+    const columnSql = `${quoteIdentifier(alias)}.${quoteIdentifier(predicate.column)}`
+
+    if (predicate.op === "in") {
+      const param = nextParam(state, [...predicate.values])
+      builder.whereClauses.push(`${columnSql} = ANY(${param})`)
+      return
+    }
+
+    if (predicate.op === "eq") {
+      const param = nextParam(state, predicate.value)
+      builder.whereClauses.push(`${columnSql} IS NOT DISTINCT FROM ${param}`)
+      return
+    }
+
+    const ordering = findOrderingForColumn(predicate.column, orderings)
+    const leftExpression = ordering
+      ? renderOrderedColumnSql(columnSql, ordering)
+      : columnSql
+    const operator =
+      predicate.op === "gt"
+        ? ">"
+        : predicate.op === "ge"
+          ? ">="
+          : predicate.op === "lt"
+            ? "<"
+            : "<="
+    const value = resolvePredicateValue(predicate, ordering)
+    const param = nextParam(state, value)
+    builder.whereClauses.push(`${leftExpression} ${operator} ${param}`)
   })
 }
 
@@ -532,6 +623,13 @@ const buildTermDomainQuery = (
     )
     builder.whereClauses.push(`${valueSql} IS NOT NULL`)
     appendStaticFilters(builder, state, alias, explicitDomain.staticFilters)
+    appendSourcePredicates(
+      builder,
+      state,
+      alias,
+      explicitDomain.predicates,
+      explicitDomain.orderings,
+    )
     const where =
       builder.whereClauses.length === 0
         ? ""
@@ -579,6 +677,13 @@ const buildTermDomainQuery = (
       )
       builder.whereClauses.push(`${valueSql} IS NOT NULL`)
       appendStaticFilters(builder, state, alias, entry.source.staticFilters)
+      appendSourcePredicates(
+        builder,
+        state,
+        alias,
+        entry.source.predicates,
+        entry.source.orderings,
+      )
       const where =
         builder.whereClauses.length === 0
           ? ""

@@ -5,6 +5,8 @@ import {
   type EvaluatorAdapter,
   type Relation,
   type Rule,
+  type SourceOrdering,
+  type SourcePredicate,
   type Term,
 } from "./algebra"
 
@@ -791,6 +793,15 @@ export const validateStratifiedNegation = (rule: Rule): void => {
 export interface InMemoryRelationFacts<Left, Right> {
   relation: Relation<Left, Right>
   pairs: Array<readonly [Left, Right]>
+  rows?: Array<InMemoryRelationRow<Left, Right>>
+  predicates?: ReadonlyArray<SourcePredicate>
+  orderings?: ReadonlyArray<SourceOrdering>
+}
+
+export interface InMemoryRelationRow<Left, Right> {
+  left: Left
+  right: Right
+  columns?: Readonly<Record<string, unknown>>
 }
 
 export interface InMemoryAdapterOptions {
@@ -801,11 +812,125 @@ export interface InMemoryAdapterOptions {
 const buildFacts = (
   relations: Array<InMemoryRelationFacts<any, any>>,
 ): RelationFacts => {
+  const findOrderingForColumn = (
+    column: string,
+    orderings?: ReadonlyArray<SourceOrdering>,
+  ): SourceOrdering | undefined => {
+    return orderings?.find(ordering => ordering.column === column)
+  }
+
+  const readRowColumnValue = <Left, Right>(
+    row: InMemoryRelationRow<Left, Right>,
+    column: string,
+  ): unknown => {
+    if (column === "left") {
+      return row.left
+    }
+
+    if (column === "right") {
+      return row.right
+    }
+
+    return row.columns?.[column]
+  }
+
+  const toComparableValue = (
+    value: unknown,
+    ordering?: SourceOrdering,
+  ): unknown => {
+    if (!ordering) {
+      return value
+    }
+
+    if (typeof value !== "string") {
+      return null
+    }
+
+    return ordering.order[value] ?? null
+  }
+
+  const rowMatchesPredicate = (
+    row: InMemoryRelationRow<any, any>,
+    predicate: SourcePredicate,
+    orderings?: ReadonlyArray<SourceOrdering>,
+  ): boolean => {
+    const rawValue = readRowColumnValue(row, predicate.column)
+    if (rawValue === undefined) {
+      throw new Error(
+        `in-memory relation predicate references unknown column "${predicate.column}"`,
+      )
+    }
+
+    if (predicate.op === "in") {
+      return predicate.values.some(value => Object.is(rawValue, value))
+    }
+
+    if (predicate.op === "eq") {
+      return Object.is(rawValue, predicate.value)
+    }
+
+    const ordering = findOrderingForColumn(predicate.column, orderings)
+    const left = toComparableValue(rawValue, ordering)
+    const right = toComparableValue(predicate.value, ordering)
+
+    if (
+      left === null ||
+      left === undefined ||
+      right === null ||
+      right === undefined
+    ) {
+      return false
+    }
+
+    if (predicate.op === "gt") {
+      return (
+        (left as number | string | Date) > (right as number | string | Date)
+      )
+    }
+
+    if (predicate.op === "ge") {
+      return (
+        (left as number | string | Date) >= (right as number | string | Date)
+      )
+    }
+
+    if (predicate.op === "lt") {
+      return (
+        (left as number | string | Date) < (right as number | string | Date)
+      )
+    }
+
+    if (predicate.op === "le") {
+      return (
+        (left as number | string | Date) <= (right as number | string | Date)
+      )
+    }
+
+    return false
+  }
+
   const output = new Map<symbol, Array<FactPair>>()
 
   relations.forEach(entry => {
+    const rows =
+      entry.rows ??
+      entry.pairs.map(pair => ({
+        left: pair[0],
+        right: pair[1],
+      }))
+    const filteredRows =
+      entry.predicates && entry.predicates.length > 0
+        ? rows.filter(row =>
+            entry.predicates?.every(predicate =>
+              rowMatchesPredicate(row, predicate, entry.orderings),
+            ),
+          )
+        : rows
+    const filteredPairs = filteredRows.map(
+      row => [row.left, row.right] as readonly [unknown, unknown],
+    )
     const existing = output.get(entry.relation.id) ?? []
-    output.set(entry.relation.id, [...existing, ...entry.pairs])
+    output.set(entry.relation.id, [...existing, ...filteredPairs])
   })
 
   return output

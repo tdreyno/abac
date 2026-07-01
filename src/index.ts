@@ -47,6 +47,9 @@ export type {
   RuleBranchOutcome,
   RuleReferenceToken,
   Rule,
+  SourceComparisonOperator,
+  SourceOrdering,
+  SourcePredicate,
   Term,
   TermInfo,
   UnaryPredicate,
@@ -54,10 +57,14 @@ export type {
 export type {
   InMemoryAdapterOptions,
   InMemoryRelationFacts,
+  InMemoryRelationRow,
 } from "./core/algebra-inmemory"
 export type {
   PlannedPostgresRule,
   PostgresAdapterOptions,
+  PostgresSourceComparisonOperator,
+  PostgresSourceOrdering,
+  PostgresSourcePredicate,
   PostgresEdgeRelationSource,
   PostgresJoinTableRelationSource,
   PostgresProofDiagnostic,

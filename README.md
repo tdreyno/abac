@@ -162,6 +162,23 @@ Use when relation facts are persisted in SQL tables.
 - `createPostgresAdapter({ relationMappings, queryExecutor, ... })`
 - `planPostgresRule(rule, { relationMappings, environment, ... })`
 
+`relationMappings[].source` supports both legacy `staticFilters` and typed predicates:
+
+```typescript
+{
+  kind: "join-table",
+  table: "team_members",
+  leftColumn: "user_id",
+  rightColumn: "team_id",
+  predicates: [{ column: "role", op: "ge", value: "editor" }],
+  orderings: [
+    { column: "role", order: { viewer: 10, editor: 20, admin: 30, owner: 40 } },
+  ],
+}
+```
+
+Typed predicates are compiled to parameterized SQL (`eq`, `in`, `gt`, `ge`, `lt`, `le`).
+
 `planPostgresRule` can produce diagnostics for join-table index hints, domain coverage for `forAll`, and other planner guidance.
 
 ## RBAC Package
