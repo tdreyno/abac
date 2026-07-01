@@ -110,9 +110,12 @@ const blocked = await instance.evaluate(canReadDocument, {
 Core constructors:
 
 - `term<T>()`
-- `term<T>().is(predicate)`
+- `term<T>().is(jsPredicateOrExpression)`
+- `attr(term, "column")`
 - `relation<Left, Right>()`
 - `eq(leftTerm, rightTermOrValue)`
+- `eq(attr(...), attr(...) | value)`
+- `ne`, `gt`, `ge`, `lt`, `le`, `isNull`, `isNotNull`
 
 Composition operators:
 
@@ -180,6 +183,8 @@ Use when relation facts are persisted in SQL tables.
 Typed predicates are compiled to parameterized SQL (`eq`, `in`, `gt`, `ge`, `lt`, `le`).
 
 `planPostgresRule` can produce diagnostics for join-table index hints, domain coverage for `forAll`, and other planner guidance.
+
+For SQL pushdown with `term.is(...)` expressions, configure `termDomains` with `columns` mappings so `attr(term, "column")` can resolve to mapped SQL columns.
 
 ## RBAC Package
 

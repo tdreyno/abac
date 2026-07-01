@@ -7,15 +7,20 @@ he-said exports algebra constructors, an in-memory adapter, and related types.
 ### Algebra Constructors
 
 - term<T>()
-- term<T>().is(predicate)
+- term<T>().is(jsPredicateOrExpression)
+- attr(term, "column")
 - relation<Left, Right>()
 - eq(leftTerm, rightTermOrValue)
+- eq(attr(...), attr(...) | value)
+- ne / gt / ge / lt / le
+- isNull / isNotNull
 - ref(name)
 - and(...constraints)
 - or(...constraints)
 - not(constraint)
 - implies(premise, consequence)
 - oneOf(term, values)
+- oneOf(attr(...), values)
 - atLeast(count, ...constraints)
 - atMost(count, ...constraints)
 - exactly(count, ...constraints)
@@ -81,6 +86,7 @@ Postgres relation/domain sources support:
 - Rule trees are immutable plain objects.
 - and and or flatten nested nodes of the same kind.
 - oneOf(term, values) is equivalent to or(eq(term, v1), eq(term, v2), ...).
+- SQL-safe predicate expressions are attached through term.is(...), for example: term.is(eq(attr(term, "status"), "active")).
 - cardinality helpers count satisfied constraints:
   - atLeast(n, ...rules)
   - atMost(n, ...rules)

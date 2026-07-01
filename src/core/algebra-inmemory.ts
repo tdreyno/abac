@@ -1,8 +1,13 @@
 import {
+  type AttributeAccessor,
   buildEvaluationProofDetails,
   type Environment,
   type EvaluationProof,
   type EvaluatorAdapter,
+  getPredicateExpressionTerms,
+  isAttributeAccessor,
+  isPredicateExpression,
+  type PredicateExpression,
   type Relation,
   type Rule,
   type SourceOrdering,
@@ -231,6 +236,138 @@ type SolverState = {
   }
 }
 
+const resolveExpressionOperand = (
+  operand: Term<unknown> | AttributeAccessor<any, unknown>,
+  environment: Readonly<Environment>,
+): unknown => {
+  if (!isAttributeAccessor(operand)) {
+    return environment[operand]
+  }
+
+  const entity = environment[operand.term]
+  if (
+    entity === null ||
+    entity === undefined ||
+    typeof entity !== "object" ||
+    Array.isArray(entity)
+  ) {
+    return undefined
+  }
+
+  return (entity as Record<string, unknown>)[operand.column]
+}
+
+const evaluatePredicateExpression = (
+  expression: PredicateExpression,
+  environment: Readonly<Environment>,
+): boolean => {
+  const resolve = (
+    value: Term<unknown> | AttributeAccessor<any, unknown> | unknown,
+  ): unknown => {
+    if (isAttributeAccessor(value) || typeof value === "symbol") {
+      return resolveExpressionOperand(
+        value as Term<unknown> | AttributeAccessor<any, unknown>,
+        environment,
+      )
+    }
+    return value
+  }
+
+  switch (expression.operator) {
+    case "eq":
+      return Object.is(resolve(expression.left), resolve(expression.right))
+    case "ne":
+      return !Object.is(resolve(expression.left), resolve(expression.right))
+    case "gt": {
+      const left = resolve(expression.left)
+      const right = resolve(expression.right)
+      return left !== null &&
+        left !== undefined &&
+        right !== null &&
+        right !== undefined
+        ? (left as number | string | Date) > (right as number | string | Date)
+        : false
+    }
+    case "ge": {
+      const left = resolve(expression.left)
+      const right = resolve(expression.right)
+      return left !== null &&
+        left !== undefined &&
+        right !== null &&
+        right !== undefined
+        ? (left as number | string | Date) >= (right as number | string | Date)
+        : false
+    }
+    case "lt": {
+      const left = resolve(expression.left)
+      const right = resolve(expression.right)
+      return left !== null &&
+        left !== undefined &&
+        right !== null &&
+        right !== undefined
+        ? (left as number | string | Date) < (right as number | string | Date)
+        : false
+    }
+    case "le": {
+      const left = resolve(expression.left)
+      const right = resolve(expression.right)
+      return left !== null &&
+        left !== undefined &&
+        right !== null &&
+        right !== undefined
+        ? (left as number | string | Date) <= (right as number | string | Date)
+        : false
+    }
+    case "one-of": {
+      const left = resolve(expression.left)
+      return expression.values.some(option => Object.is(left, option))
+    }
+    case "is-null": {
+      const value = resolve(expression.operand)
+      return value === null || value === undefined
+    }
+    case "is-not-null": {
+      const value = resolve(expression.operand)
+      return value !== null && value !== undefined
+    }
+    default: {
+      const exhaustive: never = expression
+      return exhaustive
+    }
+  }
+}
+
+const expandEnvironmentsForTerms = (
+  environments: Array<Environment>,
+  terms: Array<AnyTerm>,
+  state: SolverState,
+): Array<Environment> => {
+  let expanded = environments
+
+  terms.forEach(term => {
+    const next: Array<Environment> = []
+    expanded.forEach(environment => {
+      const candidates = collectCandidates(
+        term,
+        environment,
+        state.facts,
+        state.analysis,
+        state.globalDomain,
+      )
+      candidates.forEach(candidate => {
+        next.push(
+          hasBinding(environment, term)
+            ? environment
+            : bindValue(environment, term, candidate),
+        )
+      })
+    })
+    expanded = next
+  })
+
+  return expanded
+}
+
 const collectDefinitions = (rule: Rule): Map<string, Rule> => {
   const definitions = new Map<string, Rule>()
 
@@ -433,6 +570,22 @@ const solveRule = async (
       const output: Array<Environment> = []
 
       for (const environment of environments) {
+        if (isPredicateExpression(rule.predicate)) {
+          const expression = rule.predicate
+          const terms = getPredicateExpressionTerms(expression)
+          const expanded = expandEnvironmentsForTerms(
+            [environment],
+            terms,
+            state,
+          )
+          expanded.forEach(next => {
+            if (evaluatePredicateExpression(expression, next)) {
+              output.push(next)
+            }
+          })
+          continue
+        }
+
         const candidates = collectCandidates(
           rule.term,
           environment,

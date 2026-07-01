@@ -2,6 +2,7 @@ import {
   atLeast,
   atMost,
   algebra,
+  attr,
   createInMemoryAdapter,
   distinct,
   eq,
@@ -11,6 +12,7 @@ import {
   implies,
   letRule,
   oneOf,
+  isNotNull,
   ref,
   relation,
   select,
@@ -739,6 +741,52 @@ describe("algebra api", () => {
         [user]: { id: "u1", suspended: false },
         [permission]: "write",
         [role]: "admin",
+      }),
+    ).resolves.toBe(false)
+  })
+
+  it("evaluates expression predicates attached through term.is(...)", async () => {
+    type Viewer = { id: string; suspended: boolean }
+    type RecordDoc = {
+      id: string
+      ownerId: string
+      workspaceAccess: string | null
+    }
+
+    const viewer = term<Viewer>()
+    const document = term<RecordDoc>()
+
+    const rule = algebra.and(
+      viewer.is(eq(attr(viewer, "id"), attr(document, "ownerId"))),
+      document.is(isNotNull(attr(document, "workspaceAccess"))),
+    )
+
+    const adapter = createInMemoryAdapter({
+      relations: [],
+      domain: [
+        { id: "u1", suspended: false } satisfies Viewer,
+        {
+          id: "d1",
+          ownerId: "u1",
+          workspaceAccess: "read",
+        } satisfies RecordDoc,
+      ],
+    })
+    const instance = evaluator(adapter, {
+      evaluatorContext: null,
+    })
+
+    await expect(
+      instance.evaluate(rule, {
+        [viewer]: { id: "u1", suspended: false },
+        [document]: { id: "d1", ownerId: "u1", workspaceAccess: "read" },
+      }),
+    ).resolves.toBe(true)
+
+    await expect(
+      instance.evaluate(rule, {
+        [viewer]: { id: "u1", suspended: false },
+        [document]: { id: "d1", ownerId: "u2", workspaceAccess: "read" },
       }),
     ).resolves.toBe(false)
   })

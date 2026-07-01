@@ -1,9 +1,11 @@
 import {
   and,
+  attr,
   createPostgresAdapter,
   eq,
   evaluator,
   forAll,
+  isNotNull,
   not,
   or,
   planPostgresRule,
@@ -152,6 +154,69 @@ describe("postgres algebra adapter", () => {
     expect(plan.sql).toContain("EXISTS(SELECT 1 WHERE")
     expect(plan.sql).toContain("UNION ALL")
     expect(plan.params).toHaveLength(3)
+  })
+
+  it("plans term.is(...) SQL expression predicates with attribute column mappings", () => {
+    const document = term<{ id: string; workspaceAccess: string | null }>()
+
+    const rule = and(
+      document
+        .is(eq(attr(document, "workspaceAccess"), "read"))
+        .is(isNotNull(attr(document, "workspaceAccess"))),
+    )
+
+    const plan = planPostgresRule(rule, {
+      relationMappings: [],
+      termDomains: [
+        {
+          term: document,
+          table: "documents",
+          valueColumn: "id",
+          columns: {
+            workspaceAccess: "workspace_access",
+          },
+        },
+      ],
+      termEncodings: [{ term: document, encode: value => value.id }],
+      environment: {
+        [document]: { id: "d1", workspaceAccess: "read" },
+      },
+    })
+
+    expect(plan.sql).toContain('"documents" "src1"')
+    expect(plan.sql).toContain('"src1"."id" IS NOT DISTINCT FROM $1')
+    expect(plan.sql).toContain(
+      '"src1"."workspace_access" IS NOT DISTINCT FROM $2',
+    )
+    expect(plan.sql).toContain('"src1"."workspace_access" IS NOT NULL')
+    expect(plan.params).toEqual(["d1", "read"])
+  })
+
+  it("fails fast for JavaScript unary predicates in postgres planning", () => {
+    const document = term<{ id: string; workspaceAccess: string | null }>()
+    const rule = and(document.is(d => d.workspaceAccess === "read"))
+
+    expect(() =>
+      planPostgresRule(rule, {
+        relationMappings: [],
+        termDomains: [
+          {
+            term: document,
+            table: "documents",
+            valueColumn: "id",
+            columns: {
+              workspaceAccess: "workspace_access",
+            },
+          },
+        ],
+        termEncodings: [{ term: document, encode: value => value.id }],
+        environment: {
+          [document]: { id: "d1", workspaceAccess: "read" },
+        },
+      }),
+    ).toThrow(
+      "postgres adapter does not support JavaScript unary predicates; use term.is(...) with SQL expression predicates",
+    )
   })
 
   it("plans correlated not branches as not exists subqueries", () => {
