@@ -16,6 +16,8 @@ import {
   select,
   term,
   through,
+  type Environment,
+  type Rule,
   validateStratifiedNegation,
 } from ".."
 
@@ -681,5 +683,46 @@ describe("algebra api", () => {
         [role]: "admin",
       }),
     ).resolves.toBe(false)
+  })
+
+  it("supports prepared evaluators with adapter fallback merging", async () => {
+    type Viewer = { id: string }
+    type Document = { id: string }
+
+    const viewer = term<Viewer>()
+    const document = term<Document>()
+    const userOwnsDocument = relation<Viewer, Document>()
+    const rule = userOwnsDocument(viewer, document)
+
+    const capturedEnvironments: Array<Environment> = []
+    const adapter = {
+      evaluate: async (_rule: Rule, environment: Readonly<Environment>) => {
+        capturedEnvironments.push(environment)
+        return true
+      },
+    }
+
+    const instance = evaluator(adapter, {
+      evaluatorContext: null,
+    })
+
+    const prepared = await instance.prepare({
+      environment: {
+        [viewer]: { id: "u1" },
+      },
+    })
+
+    await prepared.evaluate(rule, {
+      [document]: { id: "d1" },
+    })
+    await prepared.evaluate(rule, {
+      [document]: { id: "d2" },
+    })
+
+    expect(capturedEnvironments).toHaveLength(2)
+    expect(capturedEnvironments[0]?.[viewer]).toEqual({ id: "u1" })
+    expect(capturedEnvironments[1]?.[viewer]).toEqual({ id: "u1" })
+    expect(capturedEnvironments[0]?.[document]).toEqual({ id: "d1" })
+    expect(capturedEnvironments[1]?.[document]).toEqual({ id: "d2" })
   })
 })

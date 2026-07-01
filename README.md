@@ -136,6 +136,9 @@ Evaluator:
 - `evaluator(adapter, { evaluatorContext })`
 - `instance.evaluate(rule, environment)`
 - `instance.evaluateWithProof(rule, environment)`
+- `instance.prepare({ environment?, preload?, facts? })`
+
+Prepared evaluators let you bind request-scoped actor facts once and evaluate many rules/resources without rebuilding that actor context on every call.
 
 ## Common Building Blocks
 

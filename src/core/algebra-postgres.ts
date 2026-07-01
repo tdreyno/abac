@@ -2,6 +2,8 @@ import {
   type Environment,
   type EvaluationProof,
   type EvaluatorAdapter,
+  type EvaluatorPrepareOptions,
+  type PreparedEvaluatorAdapter,
   type Relation,
   type Rule,
   type Term,
@@ -10,6 +12,36 @@ import {
 type PostgresSourceFilter = {
   sql: string
   params?: ReadonlyArray<unknown>
+}
+
+const runPreparedHydration = async (
+  source: PostgresRelationSource,
+  queryExecutor: PostgresQueryExecutor,
+): Promise<ReadonlyArray<readonly [unknown, unknown]>> => {
+  const alias = "preload_src"
+  const selectSql = [
+    `SELECT ${quoteIdentifier(alias)}.${quoteIdentifier(source.leftColumn)} AS left_value,`,
+    `${quoteIdentifier(alias)}.${quoteIdentifier(source.rightColumn)} AS right_value`,
+    `FROM ${quoteQualifiedIdentifier(source.table)} ${quoteIdentifier(alias)}`,
+  ]
+
+  const params: Array<unknown> = []
+  const whereClauses: Array<string> = []
+  source.staticFilters?.forEach(filter => {
+    whereClauses.push(applyFilterAlias(filter.sql, quoteIdentifier(alias)))
+    filter.params?.forEach(value => {
+      params.push(value)
+    })
+  })
+
+  const whereSql =
+    whereClauses.length > 0 ? ` WHERE ${whereClauses.join(" AND ")}` : ""
+  const queryResult = await queryExecutor.query<{
+    left_value: unknown
+    right_value: unknown
+  }>(`${selectSql.join(" ")}${whereSql}`, params)
+
+  return queryResult.rows.map(row => [row.left_value, row.right_value] as const)
 }
 
 type PostgresSuggestedIndex = {
@@ -107,8 +139,17 @@ export interface PostgresAdapterOptions<
   explainQuery?: boolean
 }
 
+type PreparedPostgresRelationSource = {
+  kind: "prepared"
+  pairs: ReadonlyArray<readonly [unknown, unknown]>
+}
+
+type PlannerRelationSource =
+  | PostgresRelationSource
+  | PreparedPostgresRelationSource
+
 type PlannerState = {
-  relationMappings: Map<symbol, PostgresRelationSource>
+  relationMappings: Map<symbol, PlannerRelationSource>
   termDomains: Map<symbol, PostgresTermDomainSource<any>>
   termEncodings: Map<symbol, PostgresTermEncoder<any>>
   definitions: Map<string, Rule>
@@ -275,7 +316,7 @@ const collectDefinitions = (rule: Rule): Map<string, Rule> => {
 
 const addSourceDiagnostics = (
   state: PlannerState,
-  source: PostgresRelationSource,
+  source: PlannerRelationSource,
 ): void => {
   if (source.kind !== "join-table") {
     return
@@ -345,6 +386,52 @@ const appendRelation = (
   }
 
   const alias = nextAlias(state, "rel")
+  if (source.kind === "prepared") {
+    const preparedLeftColumn = "left_value"
+    const preparedRightColumn = "right_value"
+    const tableSql =
+      source.pairs.length === 0
+        ? `(SELECT NULL AS ${quoteIdentifier(preparedLeftColumn)}, NULL AS ${quoteIdentifier(preparedRightColumn)} WHERE FALSE) ${quoteIdentifier(alias)}`
+        : `(VALUES ${source.pairs
+            .map(([leftValue, rightValue]) => {
+              const leftParam = nextParam(state, leftValue)
+              const rightParam = nextParam(state, rightValue)
+              return `(${leftParam}, ${rightParam})`
+            })
+            .join(
+              ", ",
+            )}) ${quoteIdentifier(alias)}(${quoteIdentifier(preparedLeftColumn)}, ${quoteIdentifier(preparedRightColumn)})`
+
+    builder.fromClauses.push(
+      builder.fromClauses.length === 0
+        ? `FROM ${tableSql}`
+        : `JOIN ${tableSql} ON TRUE`,
+    )
+
+    const leftSql = `${quoteIdentifier(alias)}.${quoteIdentifier(preparedLeftColumn)}`
+    const rightSql = `${quoteIdentifier(alias)}.${quoteIdentifier(preparedRightColumn)}`
+    const existingLeft = builder.columns.get(rule.left)
+    const existingRight = builder.columns.get(rule.right)
+
+    if (existingLeft) {
+      builder.whereClauses.push(
+        `${existingLeft} IS NOT DISTINCT FROM ${leftSql}`,
+      )
+    } else {
+      builder.columns.set(rule.left, leftSql)
+    }
+
+    if (existingRight) {
+      builder.whereClauses.push(
+        `${existingRight} IS NOT DISTINCT FROM ${rightSql}`,
+      )
+    } else {
+      builder.columns.set(rule.right, rightSql)
+    }
+
+    return builder
+  }
+
   const tableSql = `${quoteQualifiedIdentifier(source.table)} ${quoteIdentifier(alias)}`
 
   builder.fromClauses.push(
@@ -468,6 +555,9 @@ const collectRelationTermSources = (
         const source = state.relationMappings.get(node.relationId)
         if (!source) {
           throw new Error("postgres adapter is missing a relation mapping")
+        }
+        if (source.kind === "prepared") {
+          return
         }
 
         if (node.left === term) {
@@ -741,9 +831,12 @@ const renderInnerSql = (builder: QueryBuilder): string => {
 }
 
 const relationMappingsById = (
-  relationMappings: ReadonlyArray<PostgresRelationMapping<any, any>>,
-): Map<symbol, PostgresRelationSource> => {
-  const output = new Map<symbol, PostgresRelationSource>()
+  relationMappings: ReadonlyArray<{
+    relation: Relation<any, any>
+    source: PlannerRelationSource
+  }>,
+): Map<symbol, PlannerRelationSource> => {
+  const output = new Map<symbol, PlannerRelationSource>()
   relationMappings.forEach(entry => {
     output.set(entry.relation.id, entry.source)
   })
@@ -773,7 +866,10 @@ const termEncodingsById = (
 export const planPostgresRule = <Env extends Environment>(
   rule: Rule,
   options: {
-    relationMappings: ReadonlyArray<PostgresRelationMapping<any, any>>
+    relationMappings: ReadonlyArray<{
+      relation: Relation<any, any>
+      source: PlannerRelationSource
+    }>
     termDomains?: ReadonlyArray<PostgresTermDomainSource<any>>
     termEncodings?: ReadonlyArray<PostgresTermEncoding<any>>
     environment: Readonly<Env>
@@ -916,58 +1012,157 @@ export const createPostgresAdapter = <
 >(
   options: PostgresAdapterOptions<Env, EvaluatorContext>,
 ): EvaluatorAdapter<Env, EvaluatorContext> => {
+  const evaluateWithMappings = async (
+    rule: Rule,
+    environment: Readonly<Env>,
+    relationMappings: ReadonlyArray<{
+      relation: Relation<any, any>
+      source: PlannerRelationSource
+    }>,
+  ): Promise<boolean> => {
+    const plan = planPostgresRule(rule, {
+      relationMappings,
+      termDomains: options.termDomains,
+      termEncodings: options.termEncodings,
+      environment,
+    })
+    const result = await options.queryExecutor.query<{ ok: boolean }>(
+      plan.sql,
+      plan.params,
+    )
+
+    return result.rows[0]?.ok === true
+  }
+
+  const evaluateWithProofAndMappings = async (
+    rule: Rule,
+    environment: Readonly<Env>,
+    relationMappings: ReadonlyArray<{
+      relation: Relation<any, any>
+      source: PlannerRelationSource
+    }>,
+  ): Promise<EvaluationProof> => {
+    const plan = planPostgresRule(rule, {
+      relationMappings,
+      termDomains: options.termDomains,
+      termEncodings: options.termEncodings,
+      environment,
+    })
+    const result = await options.queryExecutor.query<{ ok: boolean }>(
+      plan.sql,
+      plan.params,
+    )
+    const ok = result.rows[0]?.ok === true
+
+    let explainRows: ReadonlyArray<Record<string, unknown>> | undefined
+    if (options.explainQuery) {
+      const explainResult = await options.queryExecutor.query(
+        `EXPLAIN (FORMAT JSON) ${plan.sql}`,
+        plan.params,
+      )
+      explainRows = explainResult.rows
+    }
+
+    const proof: EvaluationProof = {
+      ok,
+      rule,
+      details: buildProofDetails(
+        plan,
+        ok,
+        {
+          selectApplied: plan.selectApplied,
+          distinctApplied: plan.distinctApplied,
+        },
+        explainRows,
+      ),
+    }
+
+    return proof
+  }
+
+  const createPreparedAdapter = async (
+    prepareOptions: EvaluatorPrepareOptions<Env>,
+  ): Promise<PreparedEvaluatorAdapter<Env>> => {
+    const preloadRelations = prepareOptions.preload ?? []
+    if (preloadRelations.length === 0) {
+      return {
+        evaluate(rule, environment) {
+          return evaluateWithMappings(
+            rule,
+            environment,
+            options.relationMappings,
+          )
+        },
+        evaluateWithProof(rule, environment) {
+          return evaluateWithProofAndMappings(
+            rule,
+            environment,
+            options.relationMappings,
+          )
+        },
+      }
+    }
+
+    const preparedSources = new Map<symbol, PreparedPostgresRelationSource>()
+    for (const relationToPreload of preloadRelations) {
+      if (preparedSources.has(relationToPreload.id)) {
+        continue
+      }
+
+      const mapping = options.relationMappings.find(
+        entry => entry.relation.id === relationToPreload.id,
+      )
+      if (!mapping) {
+        throw new Error(
+          "postgres adapter cannot preload a relation that has no mapping",
+        )
+      }
+
+      const pairs = await runPreparedHydration(
+        mapping.source,
+        options.queryExecutor,
+      )
+      preparedSources.set(relationToPreload.id, {
+        kind: "prepared",
+        pairs,
+      })
+    }
+
+    const preparedMappings = options.relationMappings.map(entry => {
+      const preparedSource = preparedSources.get(entry.relation.id)
+      if (!preparedSource) {
+        return entry
+      }
+
+      return {
+        relation: entry.relation,
+        source: preparedSource,
+      }
+    })
+
+    return {
+      evaluate(rule, environment) {
+        return evaluateWithMappings(rule, environment, preparedMappings)
+      },
+      evaluateWithProof(rule, environment) {
+        return evaluateWithProofAndMappings(rule, environment, preparedMappings)
+      },
+    }
+  }
+
   return {
     async evaluate(rule, environment) {
-      const plan = planPostgresRule(rule, {
-        relationMappings: options.relationMappings,
-        termDomains: options.termDomains,
-        termEncodings: options.termEncodings,
-        environment,
-      })
-      const result = await options.queryExecutor.query<{ ok: boolean }>(
-        plan.sql,
-        plan.params,
-      )
-
-      return result.rows[0]?.ok === true
+      return evaluateWithMappings(rule, environment, options.relationMappings)
     },
     async evaluateWithProof(rule, environment) {
-      const plan = planPostgresRule(rule, {
-        relationMappings: options.relationMappings,
-        termDomains: options.termDomains,
-        termEncodings: options.termEncodings,
-        environment,
-      })
-      const result = await options.queryExecutor.query<{ ok: boolean }>(
-        plan.sql,
-        plan.params,
-      )
-      const ok = result.rows[0]?.ok === true
-
-      let explainRows: ReadonlyArray<Record<string, unknown>> | undefined
-      if (options.explainQuery) {
-        const explainResult = await options.queryExecutor.query(
-          `EXPLAIN (FORMAT JSON) ${plan.sql}`,
-          plan.params,
-        )
-        explainRows = explainResult.rows
-      }
-
-      const proof: EvaluationProof = {
-        ok,
+      return evaluateWithProofAndMappings(
         rule,
-        details: buildProofDetails(
-          plan,
-          ok,
-          {
-            selectApplied: plan.selectApplied,
-            distinctApplied: plan.distinctApplied,
-          },
-          explainRows,
-        ),
-      }
-
-      return proof
+        environment,
+        options.relationMappings,
+      )
+    },
+    async prepare(prepareOptions) {
+      return createPreparedAdapter(prepareOptions)
     },
   }
 }

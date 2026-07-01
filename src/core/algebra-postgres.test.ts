@@ -432,4 +432,77 @@ describe("postgres algebra adapter", () => {
       ]),
     )
   })
+
+  it("hydrates preloaded relations once and reuses prepared tuples across evaluations", async () => {
+    const actor = term<{ id: string }>()
+    const workspace = term<{ id: string }>()
+    const userInWorkspace = relation<{ id: string }, { id: string }>()
+
+    const captured: Array<{ sql: string; params: ReadonlyArray<unknown> }> = []
+    const adapter = createPostgresAdapter({
+      relationMappings: [
+        {
+          relation: userInWorkspace,
+          source: {
+            kind: "join-table",
+            table: "workspace_memberships",
+            leftColumn: "user_id",
+            rightColumn: "workspace_id",
+          },
+        },
+      ],
+      termEncodings: [
+        { term: actor, encode: encodeId },
+        { term: workspace, encode: encodeId },
+      ],
+      queryExecutor: {
+        query: async <Row extends Record<string, unknown>>(
+          sql: string,
+          params: ReadonlyArray<unknown>,
+        ) => {
+          captured.push({ sql, params })
+
+          if (sql.includes('FROM "workspace_memberships" "preload_src"')) {
+            return queryResult([
+              { left_value: "u1", right_value: "w1" },
+              { left_value: "u1", right_value: "w2" },
+            ] as unknown as ReadonlyArray<Row>)
+          }
+
+          return queryResult([{ ok: true }] as unknown as ReadonlyArray<Row>)
+        },
+      },
+    })
+    const instance = evaluator(adapter, {
+      evaluatorContext: null,
+    })
+
+    const prepared = await instance.prepare({
+      environment: {
+        [actor]: { id: "u1" },
+      },
+      preload: [userInWorkspace],
+    })
+
+    await prepared.evaluate(userInWorkspace(actor, workspace), {
+      [workspace]: { id: "w1" },
+    })
+    await prepared.evaluate(userInWorkspace(actor, workspace), {
+      [workspace]: { id: "w2" },
+    })
+
+    const hydrationQueries = captured.filter(entry =>
+      entry.sql.includes('FROM "workspace_memberships" "preload_src"'),
+    )
+    const evaluationQueries = captured.filter(entry =>
+      entry.sql.startsWith("SELECT EXISTS("),
+    )
+
+    expect(hydrationQueries).toHaveLength(1)
+    expect(evaluationQueries).toHaveLength(2)
+    evaluationQueries.forEach(entry => {
+      expect(entry.sql).toContain("(VALUES")
+      expect(entry.sql).not.toContain('"workspace_memberships"')
+    })
+  })
 })
