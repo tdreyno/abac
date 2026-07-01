@@ -120,6 +120,170 @@ describe("postgres algebra adapter", () => {
     )
   })
 
+  it("rewrites relation static filter placeholders against global parameter positions", () => {
+    const actor = term<{ id: string }>()
+    const role = term<string>()
+    const userHasWorkspaceRole = relation<{ id: string }, string>()
+
+    const plan = planPostgresRule(userHasWorkspaceRole(actor, role), {
+      relationMappings: [
+        {
+          relation: userHasWorkspaceRole,
+          source: {
+            kind: "join-table",
+            table: "workspace_memberships",
+            leftColumn: "user_id",
+            rightColumn: "role",
+            staticFilters: [
+              {
+                sql: '{{source}}."role" = $1',
+                params: ["editor"],
+              },
+            ],
+          },
+        },
+      ],
+      termEncodings: [{ term: actor, encode: encodeId }],
+      environment: {
+        [actor]: { id: "u1" },
+      },
+    })
+
+    expect(plan.sql).toContain('"rel1"."role" = $2')
+    expect(plan.params).toEqual(["u1", "editor"])
+  })
+
+  it("rewrites parameterized static filters independently across relations", () => {
+    const actor = term<{ id: string }>()
+    const workspace = term<{ id: string }>()
+    const role = term<string>()
+    const userInWorkspace = relation<{ id: string }, { id: string }>()
+    const userHasWorkspaceRole = relation<{ id: string }, string>()
+
+    const plan = planPostgresRule(
+      and(userInWorkspace(actor, workspace), userHasWorkspaceRole(actor, role)),
+      {
+        relationMappings: [
+          {
+            relation: userInWorkspace,
+            source: {
+              kind: "join-table",
+              table: "workspace_memberships",
+              leftColumn: "user_id",
+              rightColumn: "workspace_id",
+              staticFilters: [
+                {
+                  sql: '{{source}}."workspace_id" <> $1',
+                  params: ["w0"],
+                },
+              ],
+            },
+          },
+          {
+            relation: userHasWorkspaceRole,
+            source: {
+              kind: "join-table",
+              table: "workspace_memberships",
+              leftColumn: "user_id",
+              rightColumn: "role",
+              staticFilters: [
+                {
+                  sql: '{{source}}."role" = $1',
+                  params: ["editor"],
+                },
+              ],
+            },
+          },
+        ],
+        termEncodings: [{ term: actor, encode: encodeId }],
+        environment: {
+          [actor]: { id: "u1" },
+        },
+      },
+    )
+
+    expect(plan.sql).toContain('"rel1"."workspace_id" <> $2')
+    expect(plan.sql).toContain('"rel2"."role" = $3')
+    expect(plan.params).toEqual(["u1", "w0", "editor"])
+  })
+
+  it("rewrites forall domain static filter placeholders against global parameter positions", () => {
+    const viewer = term<{ id: string }>()
+    const document = term<{ id: string }>()
+    const userCanViewDocument = relation<{ id: string }, { id: string }>()
+
+    const plan = planPostgresRule(
+      forAll(document, userCanViewDocument(viewer, document)),
+      {
+        relationMappings: [
+          {
+            relation: userCanViewDocument,
+            source: {
+              kind: "join-table",
+              table: "document_viewers",
+              leftColumn: "user_id",
+              rightColumn: "document_id",
+            },
+          },
+        ],
+        termDomains: [
+          {
+            term: document,
+            table: "documents",
+            valueColumn: "id",
+            staticFilters: [
+              {
+                sql: '{{source}}."visibility" = $1',
+                params: ["public"],
+              },
+            ],
+          },
+        ],
+        termEncodings: [{ term: viewer, encode: encodeId }],
+        environment: {
+          [viewer]: { id: "u1" },
+        },
+      },
+    )
+
+    expect(plan.sql).toContain('"dom1"."visibility" = $2')
+    expect(plan.params).toEqual(["u1", "public"])
+  })
+
+  it("throws when static filter params are provided without placeholder references", () => {
+    const actor = term<{ id: string }>()
+    const workspace = term<{ id: string }>()
+    const userInWorkspace = relation<{ id: string }, { id: string }>()
+
+    expect(() =>
+      planPostgresRule(userInWorkspace(actor, workspace), {
+        relationMappings: [
+          {
+            relation: userInWorkspace,
+            source: {
+              kind: "join-table",
+              table: "workspace_memberships",
+              leftColumn: "user_id",
+              rightColumn: "workspace_id",
+              staticFilters: [
+                {
+                  sql: "{{source}}.deleted_at IS NULL",
+                  params: ["ignored"],
+                },
+              ],
+            },
+          },
+        ],
+        termEncodings: [{ term: actor, encode: encodeId }],
+        environment: {
+          [actor]: { id: "u1" },
+        },
+      }),
+    ).toThrow(
+      "postgres static filter params were provided but sql does not reference placeholders",
+    )
+  })
+
   it("plans correlated or branches as nested existential subqueries", () => {
     const actor = term<{ id: string }>()
     const role = term<string>()

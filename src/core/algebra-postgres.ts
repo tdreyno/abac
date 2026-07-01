@@ -374,11 +374,8 @@ const appendRelation = (
 
   source.staticFilters?.forEach(filter => {
     builder.whereClauses.push(
-      applyFilterAlias(filter.sql, quoteIdentifier(alias)),
+      compileStaticFilterSql(filter, state, quoteIdentifier(alias)),
     )
-    filter.params?.forEach(value => {
-      nextParam(state, value)
-    })
   })
 
   state.sources.push({
@@ -444,11 +441,65 @@ const appendStaticFilters = (
 ): void => {
   filters?.forEach(filter => {
     builder.whereClauses.push(
-      applyFilterAlias(filter.sql, quoteIdentifier(alias)),
+      compileStaticFilterSql(filter, state, quoteIdentifier(alias)),
     )
-    filter.params?.forEach(value => {
-      nextParam(state, value)
-    })
+  })
+}
+
+const compileStaticFilterSql = (
+  filter: PostgresSourceFilter,
+  state: PlannerState,
+  aliasSql: string,
+): string => {
+  const rewrittenSql = applyFilterAlias(filter.sql, aliasSql)
+  const placeholderRegex = /\$(\d+)/g
+  const placeholderMatches = Array.from(
+    rewrittenSql.matchAll(placeholderRegex),
+    match => Number(match[1]),
+  )
+  const params = filter.params ?? []
+
+  if (placeholderMatches.length === 0) {
+    if (params.length > 0) {
+      throw new Error(
+        "postgres static filter params were provided but sql does not reference placeholders",
+      )
+    }
+    return rewrittenSql
+  }
+
+  const maxIndex = Math.max(...placeholderMatches)
+  if (maxIndex > params.length) {
+    throw new Error(
+      "postgres static filter sql references a placeholder without a matching param value",
+    )
+  }
+
+  if (params.length !== maxIndex) {
+    throw new Error(
+      "postgres static filter params must exactly match referenced placeholder positions",
+    )
+  }
+
+  const referenced = new Set(placeholderMatches)
+  for (let index = 1; index <= maxIndex; index += 1) {
+    if (!referenced.has(index)) {
+      throw new Error(
+        "postgres static filter placeholders must be contiguous from $1 through the final placeholder",
+      )
+    }
+  }
+
+  const allocatedPlaceholders = params.map(value => nextParam(state, value))
+
+  return rewrittenSql.replace(placeholderRegex, (_, rawIndex: string) => {
+    const mapped = allocatedPlaceholders[Number(rawIndex) - 1]
+    if (!mapped) {
+      throw new Error(
+        "postgres static filter sql references a placeholder without a matching param value",
+      )
+    }
+    return mapped
   })
 }
 
