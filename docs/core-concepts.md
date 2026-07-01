@@ -53,6 +53,33 @@ await engine.evaluate(canManage, {
 })
 ```
 
+### Facts
+
+Use `fact<T>()` for request-time values that are computed outside relation data (feature flags, external group membership, break-glass toggles).
+
+- Facts are symbol identity tokens, like terms.
+- Facts should be passed through `facts: { [factToken]: value }`.
+- Optional labels are for debugging only (for example `fact<boolean>("isAppAdmin")`).
+
+```ts
+const isAppAdmin = fact<boolean>()
+const hasBreakGlass = fact<boolean>()
+
+const canManage = or(
+  factIsTrue(isAppAdmin),
+  and(factIsTrue(hasBreakGlass), canManageDocument),
+)
+
+await engine.evaluate(canManage, {
+  [actor]: currentUser,
+  [document]: currentDocument,
+  facts: {
+    [isAppAdmin]: false,
+    [hasBreakGlass]: true,
+  },
+})
+```
+
 Examples:
 
 - Bind a user term to a concrete user value.

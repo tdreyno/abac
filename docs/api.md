@@ -8,7 +8,7 @@ he-said exports algebra constructors, an in-memory adapter, and related types.
 
 - term<T>()
 - term<T>().is(predicate)
-- fact<T>()
+- fact<T>(labelOrOptions?)
 - factIsTrue(factToken)
 - relation<Left, Right>()
 - eq(leftTerm, rightTermOrValue)
@@ -37,6 +37,20 @@ Returns an EvaluatorInstance with:
 
 `environmentOrInput` accepts either a plain environment object, or an object with
 an optional `facts` bag keyed by fact token identity.
+
+Facts input shape:
+
+```ts
+{
+  [viewer]: user,
+  facts: {
+    [isAppAdmin]: true,
+  },
+}
+```
+
+`facts` values are merged into evaluation bindings by token identity. If a token appears
+both at the top level and in `facts`, the `facts` value wins.
 
 ### In-Memory Adapter
 
