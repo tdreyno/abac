@@ -139,6 +139,7 @@ Evaluator:
 - `evaluator(adapter, { evaluatorContext })`
 - `instance.evaluate(rule, environment)`
 - `instance.evaluateWithProof(rule, environment)`
+  - deny proofs include `proof.failing` with deterministic `path`, `kind`, and `reason`
 
 ## Common Building Blocks
 
@@ -164,6 +165,7 @@ Use when relation facts are persisted in SQL tables.
 
 - `createPostgresAdapter({ relationMappings, queryExecutor, ... })`
 - `planPostgresRule(rule, { relationMappings, environment, ... })`
+  - `createPostgresAdapter` supports `includeFailingNodeSql` (default `false`) to include parameterized failing-node SQL in `proof.failing`
 
 `relationMappings[].source` supports both legacy `staticFilters` and typed predicates:
 

@@ -45,6 +45,8 @@ export {
 } from "./core/algebra-postgres"
 export type {
   Environment,
+  EvaluationFailingNode,
+  EvaluationFailingNodeKind,
   EvaluationProofDetails,
   EvaluationProof,
   EvaluatorAdapter,

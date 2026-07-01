@@ -37,6 +37,13 @@ Returns an EvaluatorInstance with:
 
 - evaluate(rule, environment): Promise<boolean>
 - evaluateWithProof(rule, environment): Promise<EvaluationProof>
+  - EvaluationProof.ok: boolean result
+  - EvaluationProof.failing?: first unsatisfied node when denied
+    - kind: failing node category
+    - path: deterministic AST path (for stable assertions/logging)
+    - reason: concise failure reason
+    - relationId?: set for relation-node failures
+    - sql?/paramCount?: available for Postgres only when `includeFailingNodeSql` is enabled
 
 ### In-Memory Adapter
 
