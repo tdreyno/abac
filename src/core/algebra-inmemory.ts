@@ -1153,5 +1153,46 @@ export const createInMemoryAdapter = <
 
       return proof
     },
+    async filter(rule, options) {
+      validateStratifiedNegationInternal(rule)
+      const analysis = analyzeRule(rule)
+      const definitions = collectDefinitions(rule)
+      const hashEnvironment = createEnvironmentHasher()
+
+      const state: SolverState = {
+        facts,
+        analysis,
+        definitions,
+        globalDomain,
+        hashEnvironment,
+        memoCache: new Map(),
+      }
+
+      const term = options.term as unknown as AnyTerm
+      const baseEnvironment = options.environment
+      const providedCandidates = options.candidates ?? []
+      const candidates =
+        options.candidates === undefined
+          ? collectCandidates(
+              term,
+              baseEnvironment,
+              facts,
+              analysis,
+              globalDomain,
+            )
+          : [...providedCandidates]
+      const uniqueCandidates = [...new Set(candidates)]
+      const allowed: Array<unknown> = []
+
+      for (const candidate of uniqueCandidates) {
+        const scopedEnvironment = bindValue(baseEnvironment, term, candidate)
+        const matches = await solveRule(rule, [scopedEnvironment], state)
+        if (matches.length > 0) {
+          allowed.push(candidate)
+        }
+      }
+
+      return allowed as ReadonlyArray<any>
+    },
   }
 }

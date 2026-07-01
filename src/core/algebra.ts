@@ -1145,6 +1145,17 @@ export interface EvaluatorAdapter<Env extends Environment, EvaluatorContext> {
     environment: Readonly<Env>,
     evaluatorContext: EvaluatorContext,
   ) => MaybePromise<EvaluationProof>
+  filter?: <T>(
+    rule: Rule,
+    options: FilterOptions<Env, T>,
+    evaluatorContext: EvaluatorContext,
+  ) => MaybePromise<ReadonlyArray<T>>
+}
+
+export interface FilterOptions<Env extends Environment, T> {
+  readonly environment: Readonly<Env>
+  readonly term: Term<T>
+  readonly candidates?: ReadonlyArray<T>
 }
 
 export type EvaluationInput<Env extends Environment = Environment> = Env & {
@@ -1190,17 +1201,21 @@ export interface EvaluatorInstance<Env extends Environment> {
     rule: Rule,
     input: Readonly<Env> | Readonly<EvaluationInput<Env>>,
   ): Promise<EvaluationProof>
+  filter<T>(
+    rule: Rule,
+    options: FilterOptions<Env, T>,
+  ): Promise<ReadonlyArray<T>>
 }
 
 export const evaluator = <Env extends Environment, EvaluatorContext>(
   adapter: EvaluatorAdapter<Env, EvaluatorContext>,
-  options: { evaluatorContext: EvaluatorContext },
+  config: { evaluatorContext: EvaluatorContext },
 ): EvaluatorInstance<Env> => {
   return {
     evaluate(rule, input) {
       const environment = normalizeEvaluationInput(input)
       return Promise.resolve(
-        adapter.evaluate(rule, environment, options.evaluatorContext),
+        adapter.evaluate(rule, environment, config.evaluatorContext),
       )
     },
     async evaluateWithProof(rule, input) {
@@ -1209,20 +1224,27 @@ export const evaluator = <Env extends Environment, EvaluatorContext>(
         return adapter.evaluateWithProof(
           rule,
           environment,
-          options.evaluatorContext,
+          config.evaluatorContext,
         )
       }
 
       const ok = await adapter.evaluate(
         rule,
         environment,
-        options.evaluatorContext,
+        config.evaluatorContext,
       )
       return {
         ok,
         rule,
         details: buildEvaluationProofDetails(rule, ok),
       }
+    },
+    async filter(rule, options) {
+      if (!adapter.filter) {
+        throw new Error("adapter does not support filter evaluation")
+      }
+
+      return adapter.filter(rule, options, config.evaluatorContext)
     },
   }
 }

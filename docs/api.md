@@ -39,6 +39,7 @@ Returns an EvaluatorInstance with:
 
 - evaluate(rule, environmentOrInput): Promise<boolean>
 - evaluateWithProof(rule, environmentOrInput): Promise<EvaluationProof>
+- filter(rule, { environment, term, candidates? }): Promise<ReadonlyArray<T>>
 
 `environmentOrInput` accepts either a plain environment object, or an object with
 an optional `facts` bag keyed by fact token identity.
@@ -92,6 +93,7 @@ Postgres relation/domain sources support:
 - UnaryPredicate<T, Env>
 - EvaluatorAdapter<Env, EvaluatorContext>
 - EvaluatorInstance<Env>
+- FilterOptions<Env, T>
 - EvaluationProof
 - InMemoryRelationFacts<Left, Right>
 - InMemoryRelationRow<Left, Right>

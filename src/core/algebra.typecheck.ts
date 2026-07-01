@@ -75,6 +75,15 @@ instance.evaluate(baseRule, {
   [tenant]: "acme",
 })
 
+instance.filter(baseRule, {
+  environment: {
+    [viewer]: { id: "u1", suspended: false },
+    [tenant]: "acme",
+  },
+  term: team,
+  candidates: [{ id: "t1" }],
+})
+
 instance.evaluate(factIsTrue(isAppAdmin), {
   facts: {
     [isAppAdmin]: true,
