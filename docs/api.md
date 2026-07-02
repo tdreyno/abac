@@ -121,6 +121,14 @@ algebra rules and returns:
 - `sourceFor(action, resourceType, source)` (optional source pushdown mirror for tier predicates/orderings)
 - `can(...)` when initialized with `evaluator`
 
+### Drizzle Bridge (`@tdreyno/he-said/drizzle`)
+
+- `fromFk(columnRef)`
+- `associatesTable(table, { left, right, predicates? })`
+- `inColumn(columnRef, values)`
+- `drizzleResourceType(table, { owner, contextTerms?, fixed? })`
+- `drizzleExecutor(db)`
+
 ## Key Types
 
 - Environment

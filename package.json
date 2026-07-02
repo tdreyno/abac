@@ -37,6 +37,10 @@
     "./rebac": {
       "types": "./dist/rebac/index.d.ts",
       "default": "./dist/rebac/index.js"
+    },
+    "./drizzle": {
+      "types": "./dist/drizzle/index.d.ts",
+      "default": "./dist/drizzle/index.js"
     }
   },
   "files": [
@@ -80,6 +84,7 @@
     "@types/jest": "^29.5.13",
     "@types/pg": "^8.15.5",
     "eslint": "^9.39.1",
+    "drizzle-orm": "^0.44.2",
     "husky": "^9.1.7",
     "jest": "^29.7.0",
     "lint-staged": "^16.2.6",
@@ -88,6 +93,14 @@
     "sonar-scanner": "^3.1.0",
     "ts-jest": "^29.2.5",
     "typescript": "^5.6.3"
+  },
+  "peerDependencies": {
+    "drizzle-orm": "^0.44.2"
+  },
+  "peerDependenciesMeta": {
+    "drizzle-orm": {
+      "optional": true
+    }
   },
   "engines": {
     "node": ">=22"
