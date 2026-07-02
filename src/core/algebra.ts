@@ -391,6 +391,7 @@ export type Rule =
   | RelationNode
   | UnaryNode
   | TermNode
+  | ExistsNode
   | EqTermNode
   | EqValueNode
   | RefNode
@@ -424,6 +425,11 @@ export interface UnaryNode {
 
 export interface TermNode {
   readonly type: "term"
+  readonly term: AnyTerm
+}
+
+export interface ExistsNode {
+  readonly type: "exists"
   readonly term: AnyTerm
 }
 
@@ -1045,6 +1051,15 @@ export const forAll = <T>(
   }
 }
 
+export const exists = <T>(value: Term<T>): Rule => {
+  const normalized = normalizeTerm(value)
+
+  return {
+    type: "exists",
+    term: normalized.root as AnyTerm,
+  }
+}
+
 export const select = (...terms: Array<AnyTerm>) => {
   return (constraint: ConstraintInput): Rule => {
     return {
@@ -1105,6 +1120,7 @@ export interface EvaluationProof {
 
 export type EvaluationFailingNodeKind =
   | "relation"
+  | "exists"
   | "eq-term"
   | "eq-value"
   | "derives"

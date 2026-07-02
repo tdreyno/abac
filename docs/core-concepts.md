@@ -66,7 +66,7 @@ const isAppAdmin = fact<boolean>()
 const hasBreakGlass = fact<boolean>()
 
 const canManage = or(
-  factIsTrue(isAppAdmin),
+  and(factIsTrue(isAppAdmin), exists(document)),
   and(factIsTrue(hasBreakGlass), canManageDocument),
 )
 

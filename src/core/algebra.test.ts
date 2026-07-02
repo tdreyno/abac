@@ -7,6 +7,7 @@ import {
   distinct,
   eq,
   exactly,
+  exists,
   fact,
   factIsTrue,
   evaluator,
@@ -238,6 +239,69 @@ describe("algebra api", () => {
 
     await expect(
       instance.evaluate(rule, { [viewer]: u1, [document]: d1 }),
+    ).resolves.toBe(true)
+  })
+
+  it("supports first-class exists(term) for domain-backed existence checks", async () => {
+    const actor = term<User>()
+    const document = term<Document>()
+    const userCanView = relation<User, Document>()
+    const isAdmin = fact<boolean>()
+
+    const u1 = { id: "u1", suspended: false } satisfies User
+    const d1 = { id: "d1", archived: false } satisfies Document
+    const missing = { id: "d-missing", archived: false } satisfies Document
+
+    const adapter = createInMemoryAdapter({
+      relations: [{ relation: userCanView, pairs: [[u1, d1]] }],
+      domain: [u1, d1],
+    })
+    const instance = evaluator(adapter, { evaluatorContext: null })
+
+    const rule = algebra.and(
+      factIsTrue(isAdmin),
+      exists(document),
+      userCanView(actor, document),
+    )
+
+    await expect(
+      instance.evaluate(rule, {
+        [actor]: u1,
+        [document]: d1,
+        facts: { [isAdmin]: true },
+      }),
+    ).resolves.toBe(true)
+
+    await expect(
+      instance.evaluate(rule, {
+        [actor]: u1,
+        [document]: missing,
+        facts: { [isAdmin]: true },
+      }),
+    ).resolves.toBe(false)
+  })
+
+  it("allows exists(term) to bind from relation-backed candidates without a global domain", async () => {
+    const actor = term<User>()
+    const document = term<Document>()
+    const userCanView = relation<User, Document>()
+
+    const u1 = { id: "u1", suspended: false } satisfies User
+    const d1 = { id: "d1", archived: false } satisfies Document
+
+    const adapter = createInMemoryAdapter({
+      relations: [{ relation: userCanView, pairs: [[u1, d1]] }],
+      domain: [],
+    })
+    const instance = evaluator(adapter, { evaluatorContext: null })
+
+    await expect(
+      instance.evaluate(
+        algebra.and(userCanView(actor, document), exists(document)),
+        {
+          [actor]: u1,
+        },
+      ),
     ).resolves.toBe(true)
   })
 

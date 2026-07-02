@@ -382,6 +382,7 @@ const sortAndChildren = (children: ReadonlyArray<Rule>): Array<Rule> => {
       case "eq-term":
       case "eq-value":
       case "derives":
+      case "exists":
         return 1
       case "ref":
       case "select":
@@ -434,6 +435,7 @@ const collectDefinitions = (rule: Rule): Map<string, Rule> => {
       case "relation":
       case "unary":
       case "term":
+      case "exists":
       case "eq-term":
       case "eq-value":
       case "ref":
@@ -506,6 +508,37 @@ const appendTerm = (
   throw new Error(
     "postgres adapter does not support unconstrained term nodes yet; anchor the term through a relation or equality first",
   )
+}
+
+const compileTermExistenceSql = (
+  term: symbol,
+  boundValueSql: string,
+  state: PlannerState,
+): string => {
+  const explicitDomain = state.termDomains.get(term)
+  if (!explicitDomain) {
+    throw new Error(
+      "postgres adapter exists(term) requires a termDomains mapping for the referenced term",
+    )
+  }
+
+  const alias = nextAlias(state, "exists")
+  const builder = createBuilder()
+  const valueSql = `${quoteIdentifier(alias)}.${quoteIdentifier(explicitDomain.valueColumn)}`
+  builder.fromClauses.push(
+    `FROM ${quoteQualifiedIdentifier(explicitDomain.table)} ${quoteIdentifier(alias)}`,
+  )
+  builder.whereClauses.push(`${valueSql} IS NOT DISTINCT FROM ${boundValueSql}`)
+  appendStaticFilters(builder, state, alias, explicitDomain.staticFilters)
+  appendSourcePredicates(
+    builder,
+    state,
+    alias,
+    explicitDomain.predicates,
+    explicitDomain.orderings,
+  )
+
+  return renderInnerSql(builder)
 }
 
 const cloneColumns = (
@@ -929,6 +962,7 @@ const collectRelationTermSources = (
         return
       }
       case "term":
+      case "exists":
       case "unary":
       case "eq-term":
       case "eq-value":
@@ -1063,6 +1097,16 @@ const compileExistsSql = (
 
       return `SELECT 1 WHERE NOT EXISTS(SELECT 1 FROM (${candidateSql}) ${quoteIdentifier(candidateAlias)} WHERE NOT EXISTS(${compileExistsSql(rule.child, state, childColumns)}))`
     }
+    case "exists": {
+      const boundValue = inheritedColumns.get(rule.term)
+      if (!boundValue) {
+        throw new Error(
+          "postgres adapter cannot compile exists(term) when the term is unbound",
+        )
+      }
+
+      return compileTermExistenceSql(rule.term, boundValue, state)
+    }
     case "memo":
       return compileExistsSql(rule.child, state, inheritedColumns)
     case "ref": {
@@ -1099,6 +1143,7 @@ const compileExistsSql = (
     }
     case "and":
     case "relation":
+    case "exists":
     case "eq-value":
     case "eq-term":
     case "derives": {
@@ -1158,6 +1203,7 @@ const appendConjunctiveRule = (
       return appendConjunctiveRule(rule.rule, builder, state)
     case "or":
     case "forall":
+    case "exists":
       builder.whereClauses.push(
         `EXISTS(${compileExistsSql(rule, state, builder.columns)})`,
       )
@@ -1419,6 +1465,7 @@ const buildProofDetails = (
 const failingKindForRule = (rule: Rule): EvaluationFailingNode["kind"] => {
   switch (rule.type) {
     case "relation":
+    case "exists":
     case "eq-term":
     case "eq-value":
     case "derives":
@@ -1441,6 +1488,8 @@ const failingReasonForRule = (rule: Rule): string => {
   switch (rule.type) {
     case "relation":
       return "no matching rows"
+    case "exists":
+      return "bound term does not exist in the configured term domain"
     case "eq-term":
       return "term equality could not be satisfied"
     case "eq-value":
@@ -1661,6 +1710,7 @@ export const createPostgresAdapter = <
         )
       }
       case "relation":
+      case "exists":
       case "eq-term":
       case "eq-value":
       case "not":

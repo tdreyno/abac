@@ -12,6 +12,7 @@ export {
   term,
   fact,
   factIsTrue,
+  exists,
   attr,
   relation,
   eq,

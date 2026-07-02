@@ -12,6 +12,7 @@ he-said exports algebra constructors, an in-memory adapter, and related types.
 - factIsTrue(factToken)
 - attr(term, "column")
 - relation<Left, Right>()
+- exists(term)
 - eq(leftTerm, rightTermOrValue)
 - eq(attr(...), attr(...) | value)
 - ne / gt / ge / lt / le
@@ -116,6 +117,7 @@ Postgres relation/domain sources support:
 - Rule trees are immutable plain objects.
 - and and or flatten nested nodes of the same kind.
 - oneOf(term, values) is equivalent to or(eq(term, v1), eq(term, v2), ...).
+- exists(term) checks row/domain existence for a bound term (useful for fail-closed admin bypass guards).
 - SQL-safe predicate expressions are attached through term.is(...), for example: term.is(eq(attr(term, "status"), "active")).
 - cardinality helpers count satisfied constraints:
   - atLeast(n, ...rules)
