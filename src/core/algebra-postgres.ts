@@ -4,9 +4,11 @@ import {
   type EvaluationFailingNode,
   type EvaluationProof,
   type EvaluatorAdapter,
+  type EvaluatorPrepareOptions,
   isAttributeAccessor,
   isPredicateExpression,
   type PredicateExpression,
+  type PreparedEvaluatorAdapter,
   type Relation,
   type Rule,
   type SourceComparisonOperator,
@@ -20,6 +22,32 @@ type PostgresSourceFilter = {
   params?: ReadonlyArray<unknown>
 }
 
+const runPreparedHydration = async (
+  source: PostgresRelationSource,
+  queryExecutor: PostgresQueryExecutor,
+): Promise<ReadonlyArray<readonly [unknown, unknown]>> => {
+  const alias = "preload_src"
+  const selectSql = [
+    `SELECT ${quoteIdentifier(alias)}.${quoteIdentifier(source.leftColumn)} AS left_value,`,
+    `${quoteIdentifier(alias)}.${quoteIdentifier(source.rightColumn)} AS right_value`,
+    `FROM ${quoteQualifiedIdentifier(source.table)} ${quoteIdentifier(alias)}`,
+  ]
+
+  const params: Array<unknown> = []
+  const whereClauses: Array<string> = []
+  source.staticFilters?.forEach(filter => {
+    whereClauses.push(bindStaticFilterSql({ params }, filter, alias))
+  })
+
+  const whereSql =
+    whereClauses.length > 0 ? ` WHERE ${whereClauses.join(" AND ")}` : ""
+  const queryResult = await queryExecutor.query<{
+    left_value: unknown
+    right_value: unknown
+  }>(`${selectSql.join(" ")}${whereSql}`, params)
+
+  return queryResult.rows.map(row => [row.left_value, row.right_value] as const)
+}
 export type PostgresSourceComparisonOperator = SourceComparisonOperator
 export type PostgresSourcePredicate = SourcePredicate
 export type PostgresSourceOrdering = SourceOrdering
@@ -109,6 +137,24 @@ export interface PlannedPostgresRule {
   }>
 }
 
+export interface PostgresTermSqlBinding<T> {
+  term: Term<T>
+  sql: string
+}
+
+export interface PlannedPostgresPredicate {
+  readonly sql: string
+  readonly params: ReadonlyArray<unknown>
+  readonly diagnostics: ReadonlyArray<PostgresProofDiagnostic>
+  readonly selectApplied: number
+  readonly distinctApplied: number
+  readonly sources: ReadonlyArray<{
+    relationId: symbol
+    kind: PostgresRelationSource["kind"]
+    table: string
+  }>
+}
+
 export interface PostgresAdapterOptions<
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   Env extends Environment = Environment,
@@ -125,8 +171,22 @@ export interface PostgresAdapterOptions<
   includeFailingNodeSql?: boolean
 }
 
+type PreparedPostgresRelationSource = {
+  kind: "prepared"
+  pairs: ReadonlyArray<readonly [unknown, unknown]>
+}
+
+type PlannerRelationSource =
+  | PostgresRelationSource
+  | PreparedPostgresRelationSource
+
+type PlannerRelationMapping = {
+  relation: Relation<any, any>
+  source: PlannerRelationSource
+}
+
 type PlannerState = {
-  relationMappings: Map<symbol, PostgresRelationSource>
+  relationMappings: Map<symbol, PlannerRelationSource>
   termDomains: Map<symbol, PostgresTermDomainSource<any>>
   termAttributeAliases: Map<symbol, string>
   termEncodings: Map<symbol, PostgresTermEncoder<any>>
@@ -150,6 +210,10 @@ type QueryBuilder = {
   whereClauses: Array<string>
 }
 
+type ParamState = {
+  params: Array<unknown>
+}
+
 const quoteIdentifier = (value: string): string => {
   return `"${value.split('"').join('""')}"`
 }
@@ -163,7 +227,7 @@ const nextAlias = (state: PlannerState, prefix: string): string => {
   return `${prefix}${state.nextAlias}`
 }
 
-const nextParam = (state: PlannerState, value: unknown): string => {
+const nextParam = (state: ParamState, value: unknown): string => {
   state.params.push(value)
   return `$${state.params.length}`
 }
@@ -211,6 +275,66 @@ const termKey = (state: PlannerState, term: symbol): string => {
 
 const applyFilterAlias = (sql: string, alias: string): string => {
   return sql.split("{{source}}").join(alias)
+}
+
+const staticFilterParamPattern = /\$([1-9][0-9]*)/g
+
+const parseStaticFilterParamIndexes = (sql: string): Array<number> => {
+  const output: Array<number> = []
+  let match = staticFilterParamPattern.exec(sql)
+  while (match) {
+    output.push(Number(match[1]))
+    match = staticFilterParamPattern.exec(sql)
+  }
+  staticFilterParamPattern.lastIndex = 0
+  return output
+}
+
+const bindStaticFilterSql = (
+  state: ParamState,
+  filter: PostgresSourceFilter,
+  alias: string,
+): string => {
+  const aliasedSql = applyFilterAlias(filter.sql, quoteIdentifier(alias))
+  const referencedIndexes = parseStaticFilterParamIndexes(aliasedSql)
+  const paramCount = filter.params?.length ?? 0
+  const hasPlaceholders = referencedIndexes.length > 0
+
+  if (paramCount === 0) {
+    if (hasPlaceholders) {
+      throw new Error(
+        "postgres adapter staticFilters.sql uses positional parameters but no staticFilters.params were provided",
+      )
+    }
+    return aliasedSql
+  }
+
+  if (!hasPlaceholders) {
+    throw new Error(
+      "postgres adapter staticFilters.params were provided but staticFilters.sql has no positional parameters",
+    )
+  }
+
+  const highestReferenced = Math.max(...referencedIndexes)
+  if (highestReferenced !== paramCount) {
+    throw new Error(
+      "postgres adapter staticFilters.sql positional parameters must be contiguous and match staticFilters.params length",
+    )
+  }
+
+  const offset = state.params.length
+  const reboundSql = aliasedSql.replace(
+    staticFilterParamPattern,
+    (_token, index) => {
+      return `$${Number(index) + offset}`
+    },
+  )
+  staticFilterParamPattern.lastIndex = 0
+  filter.params?.forEach(value => {
+    nextParam(state, value)
+  })
+
+  return reboundSql
 }
 
 const findOrderingForColumn = (
@@ -329,7 +453,7 @@ const collectDefinitions = (rule: Rule): Map<string, Rule> => {
 
 const addSourceDiagnostics = (
   state: PlannerState,
-  source: PostgresRelationSource,
+  source: PlannerRelationSource,
 ): void => {
   if (source.kind !== "join-table") {
     return
@@ -401,6 +525,52 @@ const appendRelation = (
   }
 
   const alias = nextAlias(state, "rel")
+  if (source.kind === "prepared") {
+    const preparedLeftColumn = "left_value"
+    const preparedRightColumn = "right_value"
+    const tableSql =
+      source.pairs.length === 0
+        ? `(SELECT NULL AS ${quoteIdentifier(preparedLeftColumn)}, NULL AS ${quoteIdentifier(preparedRightColumn)} WHERE FALSE) ${quoteIdentifier(alias)}`
+        : `(VALUES ${source.pairs
+            .map(([leftValue, rightValue]) => {
+              const leftParam = nextParam(state, leftValue)
+              const rightParam = nextParam(state, rightValue)
+              return `(${leftParam}, ${rightParam})`
+            })
+            .join(
+              ", ",
+            )}) ${quoteIdentifier(alias)}(${quoteIdentifier(preparedLeftColumn)}, ${quoteIdentifier(preparedRightColumn)})`
+
+    builder.fromClauses.push(
+      builder.fromClauses.length === 0
+        ? `FROM ${tableSql}`
+        : `JOIN ${tableSql} ON TRUE`,
+    )
+
+    const leftSql = `${quoteIdentifier(alias)}.${quoteIdentifier(preparedLeftColumn)}`
+    const rightSql = `${quoteIdentifier(alias)}.${quoteIdentifier(preparedRightColumn)}`
+    const existingLeft = builder.columns.get(rule.left)
+    const existingRight = builder.columns.get(rule.right)
+
+    if (existingLeft) {
+      builder.whereClauses.push(
+        `${existingLeft} IS NOT DISTINCT FROM ${leftSql}`,
+      )
+    } else {
+      builder.columns.set(rule.left, leftSql)
+    }
+
+    if (existingRight) {
+      builder.whereClauses.push(
+        `${existingRight} IS NOT DISTINCT FROM ${rightSql}`,
+      )
+    } else {
+      builder.columns.set(rule.right, rightSql)
+    }
+
+    return builder
+  }
+
   const tableSql = `${quoteQualifiedIdentifier(source.table)} ${quoteIdentifier(alias)}`
 
   builder.fromClauses.push(
@@ -663,12 +833,7 @@ const appendStaticFilters = (
   filters?: ReadonlyArray<PostgresSourceFilter>,
 ): void => {
   filters?.forEach(filter => {
-    builder.whereClauses.push(
-      applyFilterAlias(filter.sql, quoteIdentifier(alias)),
-    )
-    filter.params?.forEach(value => {
-      nextParam(state, value)
-    })
+    builder.whereClauses.push(bindStaticFilterSql(state, filter, alias))
   })
 }
 
@@ -728,6 +893,9 @@ const collectRelationTermSources = (
         const source = state.relationMappings.get(node.relationId)
         if (!source) {
           throw new Error("postgres adapter is missing a relation mapping")
+        }
+        if (source.kind === "prepared") {
+          return
         }
 
         if (node.left === term) {
@@ -1025,9 +1193,9 @@ const renderInnerSql = (builder: QueryBuilder): string => {
 }
 
 const relationMappingsById = (
-  relationMappings: ReadonlyArray<PostgresRelationMapping<any, any>>,
-): Map<symbol, PostgresRelationSource> => {
-  const output = new Map<symbol, PostgresRelationSource>()
+  relationMappings: ReadonlyArray<PlannerRelationMapping>,
+): Map<symbol, PlannerRelationSource> => {
+  const output = new Map<symbol, PlannerRelationSource>()
   relationMappings.forEach(entry => {
     output.set(entry.relation.id, entry.source)
   })
@@ -1054,16 +1222,18 @@ const termEncodingsById = (
   return output
 }
 
-export const planPostgresRule = <Env extends Environment>(
+const createPlannerState = (
   rule: Rule,
   options: {
-    relationMappings: ReadonlyArray<PostgresRelationMapping<any, any>>
+    relationMappings: ReadonlyArray<{
+      relation: Relation<any, any>
+      source: PlannerRelationSource
+    }>
     termDomains?: ReadonlyArray<PostgresTermDomainSource<any>>
     termEncodings?: ReadonlyArray<PostgresTermEncoding<any>>
-    environment: Readonly<Env>
   },
-): PlannedPostgresRule => {
-  const state: PlannerState = {
+): PlannerState => {
+  return {
     relationMappings: relationMappingsById(options.relationMappings),
     termDomains: termDomainsById(options.termDomains ?? []),
     termAttributeAliases: new Map(),
@@ -1077,25 +1247,76 @@ export const planPostgresRule = <Env extends Environment>(
     selectApplied: 0,
     distinctApplied: 0,
   }
-  const builder = createBuilder()
+}
 
-  Object.getOwnPropertySymbols(options.environment).forEach(key => {
-    builder.columns.set(
+const bindEnvironmentColumns = <Env extends Environment>(
+  state: PlannerState,
+  environment: Readonly<Env>,
+): Map<symbol, string> => {
+  const columns = new Map<symbol, string>()
+  Object.getOwnPropertySymbols(environment).forEach(key => {
+    columns.set(
       key,
-      nextParam(state, encodeTermValue(state, key, options.environment[key])),
+      nextParam(state, encodeTermValue(state, key, environment[key])),
     )
     termKey(state, key)
   })
+  return columns
+}
 
-  const sql = compileExistsSql(rule, state, builder.columns)
-
+const buildPlannedPredicate = (
+  state: PlannerState,
+  sql: string,
+): PlannedPostgresPredicate => {
   return {
-    sql: `SELECT EXISTS(${sql}) AS ok`,
+    sql,
     params: state.params,
     diagnostics: state.diagnostics,
     selectApplied: state.selectApplied,
     distinctApplied: state.distinctApplied,
     sources: state.sources,
+  }
+}
+
+export const planPostgresPredicate = <Env extends Environment>(
+  rule: Rule,
+  options: {
+    relationMappings: ReadonlyArray<PlannerRelationMapping>
+    termDomains?: ReadonlyArray<PostgresTermDomainSource<any>>
+    termEncodings?: ReadonlyArray<PostgresTermEncoding<any>>
+    environment: Readonly<Env>
+    bindings?: ReadonlyArray<PostgresTermSqlBinding<any>>
+  },
+): PlannedPostgresPredicate => {
+  const state = createPlannerState(rule, options)
+  const columns = bindEnvironmentColumns(state, options.environment)
+
+  options.bindings?.forEach(binding => {
+    columns.set(binding.term, binding.sql)
+    termKey(state, binding.term)
+  })
+
+  const sql = `EXISTS(${compileExistsSql(rule, state, columns)})`
+  return buildPlannedPredicate(state, sql)
+}
+
+export const planPostgresRule = <Env extends Environment>(
+  rule: Rule,
+  options: {
+    relationMappings: ReadonlyArray<PlannerRelationMapping>
+    termDomains?: ReadonlyArray<PostgresTermDomainSource<any>>
+    termEncodings?: ReadonlyArray<PostgresTermEncoding<any>>
+    environment: Readonly<Env>
+  },
+): PlannedPostgresRule => {
+  const state = createPlannerState(rule, options)
+  const columns = bindEnvironmentColumns(state, options.environment)
+  const predicateSql = `EXISTS(${compileExistsSql(rule, state, columns)})`
+  const predicate = buildPlannedPredicate(state, predicateSql)
+
+  return {
+    ...predicate,
+    sql: `SELECT ${predicate.sql} AS ok`,
   }
 }
 
@@ -1269,9 +1490,10 @@ export const createPostgresAdapter = <
   const probeRule = async (
     rule: Rule,
     environment: Readonly<Env>,
+    relationMappings: ReadonlyArray<PlannerRelationMapping>,
   ): Promise<{ ok: boolean; plan: PlannedPostgresRule }> => {
     const plan = planPostgresRule(rule, {
-      relationMappings: options.relationMappings,
+      relationMappings,
       termDomains: options.termDomains,
       termEncodings: options.termEncodings,
       environment,
@@ -1286,11 +1508,21 @@ export const createPostgresAdapter = <
     }
   }
 
+  const evaluateWithMappings = async (
+    rule: Rule,
+    environment: Readonly<Env>,
+    relationMappings: ReadonlyArray<PlannerRelationMapping>,
+  ): Promise<boolean> => {
+    const result = await probeRule(rule, environment, relationMappings)
+    return result.ok
+  }
+
   const findFirstFailingNode = async (
     rule: Rule,
     environment: Readonly<Env>,
     path: string,
     definitions: ReadonlyMap<string, Rule>,
+    relationMappings: ReadonlyArray<PlannerRelationMapping>,
   ): Promise<EvaluationFailingNode | undefined> => {
     switch (rule.type) {
       case "ref": {
@@ -1303,6 +1535,7 @@ export const createPostgresAdapter = <
           environment,
           `${path}.ref(${rule.name})`,
           definitions,
+          relationMappings,
         )
       }
       case "memo":
@@ -1311,6 +1544,7 @@ export const createPostgresAdapter = <
           environment,
           `${path}.memo`,
           definitions,
+          relationMappings,
         )
       case "select":
         return findFirstFailingNode(
@@ -1318,6 +1552,7 @@ export const createPostgresAdapter = <
           environment,
           `${path}.select`,
           definitions,
+          relationMappings,
         )
       case "distinct":
         return findFirstFailingNode(
@@ -1325,12 +1560,13 @@ export const createPostgresAdapter = <
           environment,
           `${path}.distinct`,
           definitions,
+          relationMappings,
         )
       default:
         break
     }
 
-    const current = await probeRule(rule, environment)
+    const current = await probeRule(rule, environment, relationMappings)
     if (current.ok) {
       return undefined
     }
@@ -1349,7 +1585,11 @@ export const createPostgresAdapter = <
                   type: "and",
                   children: [...prefix],
                 }
-          const prefixResult = await probeRule(prefixRule, environment)
+          const prefixResult = await probeRule(
+            prefixRule,
+            environment,
+            relationMappings,
+          )
           if (!prefixResult.ok) {
             return (
               (await findFirstFailingNode(
@@ -1357,6 +1597,7 @@ export const createPostgresAdapter = <
                 environment,
                 childPath,
                 definitions,
+                relationMappings,
               )) ??
               buildFailingNode(child, childPath, {
                 includeSql: options.includeFailingNodeSql === true,
@@ -1379,6 +1620,7 @@ export const createPostgresAdapter = <
             environment,
             childPath,
             definitions,
+            relationMappings,
           )
           if (nested) {
             return nested
@@ -1390,7 +1632,11 @@ export const createPostgresAdapter = <
         })
       }
       case "given": {
-        const contextResult = await probeRule(rule.context, environment)
+        const contextResult = await probeRule(
+          rule.context,
+          environment,
+          relationMappings,
+        )
         if (!contextResult.ok) {
           return (
             (await findFirstFailingNode(
@@ -1398,6 +1644,7 @@ export const createPostgresAdapter = <
               environment,
               `${path}.context`,
               definitions,
+              relationMappings,
             )) ??
             buildFailingNode(rule, path, {
               includeSql: options.includeFailingNodeSql === true,
@@ -1410,6 +1657,7 @@ export const createPostgresAdapter = <
           environment,
           `${path}.rule`,
           definitions,
+          relationMappings,
         )
       }
       case "relation":
@@ -1431,63 +1679,252 @@ export const createPostgresAdapter = <
     }
   }
 
+  const evaluateWithProofAndMappings = async (
+    rule: Rule,
+    environment: Readonly<Env>,
+    relationMappings: ReadonlyArray<PlannerRelationMapping>,
+  ): Promise<EvaluationProof> => {
+    const plan = planPostgresRule(rule, {
+      relationMappings,
+      termDomains: options.termDomains,
+      termEncodings: options.termEncodings,
+      environment,
+    })
+    const result = await options.queryExecutor.query<{ ok: boolean }>(
+      plan.sql,
+      plan.params,
+    )
+    const ok = result.rows[0]?.ok === true
+    const definitions = collectDefinitions(rule)
+    const failing = ok
+      ? undefined
+      : await findFirstFailingNode(
+          rule,
+          environment,
+          "root",
+          definitions,
+          relationMappings,
+        )
+
+    let explainRows: ReadonlyArray<Record<string, unknown>> | undefined
+    if (options.explainQuery) {
+      const explainResult = await options.queryExecutor.query(
+        `EXPLAIN (FORMAT JSON) ${plan.sql}`,
+        plan.params,
+      )
+      explainRows = explainResult.rows
+    }
+
+    const proof: EvaluationProof = {
+      ok,
+      rule,
+      failing,
+      details: buildProofDetails(
+        plan,
+        ok,
+        {
+          selectApplied: plan.selectApplied,
+          distinctApplied: plan.distinctApplied,
+        },
+        explainRows,
+      ),
+    }
+
+    return proof
+  }
+
+  const createPreparedAdapter = async (
+    prepareOptions: EvaluatorPrepareOptions<Env>,
+  ): Promise<PreparedEvaluatorAdapter<Env>> => {
+    const preloadRelations = prepareOptions.preload ?? []
+    if (preloadRelations.length === 0) {
+      return {
+        evaluate(rule, environment) {
+          return evaluateWithMappings(
+            rule,
+            environment,
+            options.relationMappings,
+          )
+        },
+        evaluateWithProof(rule, environment) {
+          return evaluateWithProofAndMappings(
+            rule,
+            environment,
+            options.relationMappings,
+          )
+        },
+      }
+    }
+
+    const preparedSources = new Map<symbol, PreparedPostgresRelationSource>()
+    for (const relationToPreload of preloadRelations) {
+      if (preparedSources.has(relationToPreload.id)) {
+        continue
+      }
+
+      const mapping = options.relationMappings.find(
+        entry => entry.relation.id === relationToPreload.id,
+      )
+      if (!mapping) {
+        throw new Error(
+          "postgres adapter cannot preload a relation that has no mapping",
+        )
+      }
+
+      const pairs = await runPreparedHydration(
+        mapping.source,
+        options.queryExecutor,
+      )
+      preparedSources.set(relationToPreload.id, {
+        kind: "prepared",
+        pairs,
+      })
+    }
+
+    const preparedMappings = options.relationMappings.map(entry => {
+      const preparedSource = preparedSources.get(entry.relation.id)
+      if (!preparedSource) {
+        return entry
+      }
+
+      return {
+        relation: entry.relation,
+        source: preparedSource,
+      }
+    })
+
+    return {
+      evaluate(rule, environment) {
+        return evaluateWithMappings(rule, environment, preparedMappings)
+      },
+      evaluateWithProof(rule, environment) {
+        return evaluateWithProofAndMappings(rule, environment, preparedMappings)
+      },
+    }
+  }
+
   return {
     async evaluate(rule, environment) {
-      const plan = planPostgresRule(rule, {
-        relationMappings: options.relationMappings,
-        termDomains: options.termDomains,
-        termEncodings: options.termEncodings,
-        environment,
-      })
-      const result = await options.queryExecutor.query<{ ok: boolean }>(
-        plan.sql,
-        plan.params,
-      )
-
-      return result.rows[0]?.ok === true
+      return evaluateWithMappings(rule, environment, options.relationMappings)
     },
     async evaluateWithProof(rule, environment) {
-      const plan = planPostgresRule(rule, {
-        relationMappings: options.relationMappings,
-        termDomains: options.termDomains,
-        termEncodings: options.termEncodings,
-        environment,
-      })
-      const result = await options.queryExecutor.query<{ ok: boolean }>(
-        plan.sql,
-        plan.params,
-      )
-      const ok = result.rows[0]?.ok === true
-      const definitions = collectDefinitions(rule)
-      const failing = ok
-        ? undefined
-        : await findFirstFailingNode(rule, environment, "root", definitions)
-
-      let explainRows: ReadonlyArray<Record<string, unknown>> | undefined
-      if (options.explainQuery) {
-        const explainResult = await options.queryExecutor.query(
-          `EXPLAIN (FORMAT JSON) ${plan.sql}`,
-          plan.params,
-        )
-        explainRows = explainResult.rows
-      }
-
-      const proof: EvaluationProof = {
-        ok,
+      return evaluateWithProofAndMappings(
         rule,
-        failing,
-        details: buildProofDetails(
-          plan,
-          ok,
-          {
-            selectApplied: plan.selectApplied,
-            distinctApplied: plan.distinctApplied,
-          },
-          explainRows,
-        ),
-      }
+        environment,
+        options.relationMappings,
+      )
+    },
+    async prepare(prepareOptions) {
+      return createPreparedAdapter(prepareOptions)
+    },
+    async filter(rule, filterOptions) {
+      const state = createPlannerState(rule, options)
+      const candidateAlias = nextAlias(state, "cand")
+      const columns = bindEnvironmentColumns(state, filterOptions.environment)
+      columns.set(
+        filterOptions.term,
+        `${quoteIdentifier(candidateAlias)}.candidate`,
+      )
 
-      return proof
+      const candidateSql =
+        filterOptions.candidates && filterOptions.candidates.length > 0
+          ? (() => {
+              const valuesSql = filterOptions.candidates
+                .map(candidate => {
+                  return `(${nextParam(
+                    state,
+                    encodeTermValue(state, filterOptions.term, candidate),
+                  )})`
+                })
+                .join(", ")
+              return `SELECT DISTINCT ${quoteIdentifier("input")}.candidate AS candidate FROM (VALUES ${valuesSql}) ${quoteIdentifier("input")}(candidate)`
+            })()
+          : (() => {
+              const explicitDomain = state.termDomains.get(filterOptions.term)
+              if (explicitDomain) {
+                const alias = nextAlias(state, "dom")
+                const builder = createBuilder()
+                const valueSql = `${quoteIdentifier(alias)}.${quoteIdentifier(explicitDomain.valueColumn)}`
+                builder.fromClauses.push(
+                  `FROM ${quoteQualifiedIdentifier(explicitDomain.table)} ${quoteIdentifier(alias)}`,
+                )
+                builder.whereClauses.push(`${valueSql} IS NOT NULL`)
+                appendStaticFilters(
+                  builder,
+                  state,
+                  alias,
+                  explicitDomain.staticFilters,
+                )
+                const where =
+                  builder.whereClauses.length === 0
+                    ? ""
+                    : ` WHERE ${builder.whereClauses.join(" AND ")}`
+
+                return `SELECT DISTINCT ${valueSql} AS candidate ${builder.fromClauses.join(" ")}${where}`
+              }
+
+              const derivedSources = collectRelationTermSources(
+                rule,
+                filterOptions.term,
+                state,
+              )
+              if (derivedSources.length === 0) {
+                state.diagnostics.push({
+                  level: "warning",
+                  code: "filter-without-domain-source",
+                  message:
+                    "filter target term has no explicit domain source and no relation-derived candidate source.",
+                  recommendation:
+                    "Provide candidates or configure a term domain mapping so the postgres adapter can construct the filter candidate set.",
+                })
+                return "SELECT NULL AS candidate WHERE FALSE"
+              }
+
+              state.diagnostics.push({
+                level: "info",
+                code: "filter-derived-domain",
+                message:
+                  "filter candidate domain is being derived from relation sources.",
+                recommendation:
+                  "If this term has a broader semantic domain than participating relations expose, pass explicit candidates or configure a term domain source.",
+              })
+
+              return derivedSources
+                .map(entry => {
+                  const alias = nextAlias(state, "dom")
+                  const builder = createBuilder()
+                  const column =
+                    entry.side === "left"
+                      ? entry.source.leftColumn
+                      : entry.source.rightColumn
+                  const valueSql = `${quoteIdentifier(alias)}.${quoteIdentifier(column)}`
+                  builder.fromClauses.push(
+                    `FROM ${quoteQualifiedIdentifier(entry.source.table)} ${quoteIdentifier(alias)}`,
+                  )
+                  builder.whereClauses.push(`${valueSql} IS NOT NULL`)
+                  appendStaticFilters(
+                    builder,
+                    state,
+                    alias,
+                    entry.source.staticFilters,
+                  )
+                  const where =
+                    builder.whereClauses.length === 0
+                      ? ""
+                      : ` WHERE ${builder.whereClauses.join(" AND ")}`
+
+                  return `SELECT ${valueSql} AS candidate ${builder.fromClauses.join(" ")}${where}`
+                })
+                .join(" UNION ")
+            })()
+
+      const querySql = `SELECT ${quoteIdentifier(candidateAlias)}.candidate AS candidate FROM (${candidateSql}) ${quoteIdentifier(candidateAlias)} WHERE EXISTS(${compileExistsSql(rule, state, columns)})`
+      const result = await options.queryExecutor.query<{ candidate: unknown }>(
+        querySql,
+        state.params,
+      )
+
+      return result.rows.map(row => row.candidate as any)
     },
   }
 }

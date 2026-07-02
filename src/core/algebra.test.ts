@@ -7,17 +7,22 @@ import {
   distinct,
   eq,
   exactly,
+  fact,
+  factIsTrue,
   evaluator,
   forAll,
   implies,
   letRule,
   oneOf,
+  or,
   isNotNull,
   ref,
   relation,
   select,
   term,
   through,
+  type Environment,
+  type Rule,
   validateStratifiedNegation,
 } from ".."
 
@@ -253,6 +258,7 @@ describe("algebra api", () => {
       relations: [],
       domain: [],
     })
+
     const instance = evaluator(adapter, {
       evaluatorContext: null,
     })
@@ -283,6 +289,46 @@ describe("algebra api", () => {
       instance.evaluate(rule, {
         [a]: true,
         [b]: false,
+      }),
+    ).resolves.toBe(false)
+  })
+
+  it("supports identity-keyed facts bags", async () => {
+    const allow = term<boolean>()
+    const isAppAdmin = fact<boolean>()
+    const adapter = createInMemoryAdapter({
+      relations: [],
+    })
+    const instance = evaluator(adapter, {
+      evaluatorContext: null,
+    })
+    const rule = algebra.and(
+      eq(allow, true),
+      or(factIsTrue(isAppAdmin), eq(allow, true)),
+    )
+
+    await expect(
+      instance.evaluate(rule, {
+        [allow]: true,
+        facts: {
+          [isAppAdmin]: false,
+        },
+      }),
+    ).resolves.toBe(true)
+
+    await expect(
+      instance.evaluate(factIsTrue(isAppAdmin), {
+        facts: {
+          [isAppAdmin]: true,
+        },
+      }),
+    ).resolves.toBe(true)
+
+    await expect(
+      instance.evaluate(factIsTrue(isAppAdmin), {
+        facts: {
+          [isAppAdmin]: false,
+        },
       }),
     ).resolves.toBe(false)
   })
@@ -323,6 +369,37 @@ describe("algebra api", () => {
         [action]: "read",
       }),
     ).resolves.toBe(false)
+  })
+
+  it("filters candidate subsets with in-memory adapter", async () => {
+    const viewer = term<User>()
+    const document = term<Document>()
+    const userOwnsDocument = relation<User, Document>()
+
+    const u1 = { id: "u1", suspended: false } satisfies User
+    const d1 = { id: "d1", archived: false } satisfies Document
+    const d2 = { id: "d2", archived: false } satisfies Document
+
+    const adapter = createInMemoryAdapter({
+      relations: [
+        {
+          relation: userOwnsDocument,
+          pairs: [[u1, d1]],
+        },
+      ],
+      domain: [u1, d1, d2],
+    })
+    const instance = evaluator(adapter, {
+      evaluatorContext: null,
+    })
+
+    const allowed = await instance.filter(userOwnsDocument(viewer, document), {
+      environment: { [viewer]: u1 },
+      term: document,
+      candidates: [d1, d2],
+    })
+
+    expect(allowed).toEqual([d1])
   })
 
   it("supports cardinality helpers", async () => {
@@ -823,5 +900,45 @@ describe("algebra api", () => {
         [document]: { id: "d1", ownerId: "u2", workspaceAccess: "read" },
       }),
     ).resolves.toBe(false)
+  })
+
+  it("supports prepared evaluators with adapter fallback merging", async () => {
+    type Viewer = { id: string }
+    type Document = { id: string }
+
+    const viewer = term<Viewer>()
+    const document = term<Document>()
+    const userOwnsDocument = relation<Viewer, Document>()
+    const rule = userOwnsDocument(viewer, document)
+
+    const capturedEnvironments: Array<Environment> = []
+    const adapter = {
+      evaluate: async (_rule: Rule, environment: Readonly<Environment>) => {
+        capturedEnvironments.push(environment)
+        return true
+      },
+    }
+    const instance = evaluator(adapter, {
+      evaluatorContext: null,
+    })
+
+    const prepared = await instance.prepare({
+      environment: {
+        [viewer]: { id: "u1" },
+      },
+    })
+
+    await prepared.evaluate(rule, {
+      [document]: { id: "d1" },
+    })
+    await prepared.evaluate(rule, {
+      [document]: { id: "d2" },
+    })
+
+    expect(capturedEnvironments).toHaveLength(2)
+    expect(capturedEnvironments[0]?.[viewer]).toEqual({ id: "u1" })
+    expect(capturedEnvironments[1]?.[viewer]).toEqual({ id: "u1" })
+    expect(capturedEnvironments[0]?.[document]).toEqual({ id: "d1" })
+    expect(capturedEnvironments[1]?.[document]).toEqual({ id: "d2" })
   })
 })

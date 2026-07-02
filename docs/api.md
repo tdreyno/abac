@@ -8,6 +8,8 @@ he-said exports algebra constructors, an in-memory adapter, and related types.
 
 - term<T>()
 - term<T>().is(jsPredicateOrExpression)
+- fact<T>(labelOrOptions?)
+- factIsTrue(factToken)
 - attr(term, "column")
 - relation<Left, Right>()
 - eq(leftTerm, rightTermOrValue)
@@ -35,8 +37,8 @@ he-said exports algebra constructors, an in-memory adapter, and related types.
 
 Returns an EvaluatorInstance with:
 
-- evaluate(rule, environment): Promise<boolean>
-- evaluateWithProof(rule, environment): Promise<EvaluationProof>
+- evaluate(rule, environmentOrInput): Promise<boolean>
+- evaluateWithProof(rule, environmentOrInput): Promise<EvaluationProof>
   - EvaluationProof.ok: boolean result
   - EvaluationProof.failing?: first unsatisfied node when denied
     - kind: failing node category
@@ -44,6 +46,24 @@ Returns an EvaluatorInstance with:
     - reason: concise failure reason
     - relationId?: set for relation-node failures
     - sql?/paramCount?: available for Postgres only when `includeFailingNodeSql` is enabled
+- filter(rule, { environment, term, candidates? }): Promise<ReadonlyArray<T>>
+
+`environmentOrInput` accepts either a plain environment object, or an object with
+an optional `facts` bag keyed by fact token identity.
+
+Facts input shape:
+
+```ts
+{
+  [viewer]: user,
+  facts: {
+    [isAppAdmin]: true,
+  },
+}
+```
+
+`facts` values are merged into evaluation bindings by token identity. If a token appears
+both at the top level and in `facts`, the `facts` value wins.
 
 ### In-Memory Adapter
 
@@ -75,10 +95,12 @@ Postgres relation/domain sources support:
 - Environment
 - Rule
 - Term<T>
+- Fact<T>
 - Relation<Left, Right>
 - UnaryPredicate<T, Env>
 - EvaluatorAdapter<Env, EvaluatorContext>
 - EvaluatorInstance<Env>
+- FilterOptions<Env, T>
 - EvaluationProof
 - InMemoryRelationFacts<Left, Right>
 - InMemoryRelationRow<Left, Right>

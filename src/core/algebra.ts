@@ -9,6 +9,10 @@ export type Term<T> = symbol & {
   ): Term<T>
 }
 
+export type Fact<T> = symbol & {
+  readonly __factBrand?: T
+}
+
 export type UnaryPredicate<T, Env extends Environment = Environment> = (
   value: T,
   environment: Readonly<Env>,
@@ -530,6 +534,42 @@ export interface TermInfo<T> {
   readonly predicateCount: number
 }
 
+type SymbolOptions = {
+  label?: string
+}
+
+const normalizeSymbolLabel = (
+  options?: string | SymbolOptions,
+): string | undefined => {
+  if (options === undefined) {
+    return undefined
+  }
+
+  const label = typeof options === "string" ? options : options.label
+
+  if (label === undefined) {
+    return undefined
+  }
+
+  const normalized = label.trim()
+  if (normalized.length === 0) {
+    throw new Error("symbol label must not be empty")
+  }
+
+  return normalized
+}
+
+const createBaseTerm = <T>(
+  kind: "term" | "fact",
+  options?: string | SymbolOptions,
+): Term<T> => {
+  const label = normalizeSymbolLabel(options)
+  const symbolLabel = label ? `rules.${kind}.${label}` : `rules.${kind}`
+  const value = Symbol(symbolLabel) as Term<T>
+  registerBaseTerm(value)
+  return value
+}
+
 export const isAttributeAccessor = (
   value: unknown,
 ): value is AnyAttributeAccessor => {
@@ -627,10 +667,16 @@ export const getTermInfo = <T>(value: Term<T>): TermInfo<T> => {
   }
 }
 
-export const term = <T>(): Term<T> => {
-  const value = Symbol("rules.term") as Term<T>
-  registerBaseTerm(value)
-  return value
+export const term = <T>(options?: string | SymbolOptions): Term<T> => {
+  return createBaseTerm("term", options)
+}
+
+export const fact = <T>(options?: string | SymbolOptions): Fact<T> => {
+  return createBaseTerm("fact", options) as unknown as Fact<T>
+}
+
+export const factIsTrue = (value: Fact<boolean>): Rule => {
+  return eq(value as unknown as Term<boolean>, true)
 }
 
 export const attr = <T, K extends keyof T & string>(
@@ -1123,45 +1169,224 @@ export interface EvaluatorAdapter<Env extends Environment, EvaluatorContext> {
     environment: Readonly<Env>,
     evaluatorContext: EvaluatorContext,
   ) => MaybePromise<EvaluationProof>
+  prepare?: (
+    options: EvaluatorPrepareOptions<Env>,
+    evaluatorContext: EvaluatorContext,
+  ) => MaybePromise<PreparedEvaluatorAdapter<Env>>
+  filter?: <T>(
+    rule: Rule,
+    options: FilterOptions<Env, T>,
+    evaluatorContext: EvaluatorContext,
+  ) => MaybePromise<ReadonlyArray<T>>
+}
+
+export interface EvaluatorPrepareOptions<Env extends Environment> {
+  readonly environment?: Readonly<Env>
+  readonly preload?: ReadonlyArray<Relation<any, any>>
+  readonly facts?: Readonly<Environment>
+}
+
+export interface PreparedEvaluatorAdapter<Env extends Environment> {
+  evaluate(rule: Rule, environment: Readonly<Env>): MaybePromise<boolean>
+  evaluateWithProof?: (
+    rule: Rule,
+    environment: Readonly<Env>,
+  ) => MaybePromise<EvaluationProof>
+}
+
+export interface PreparedEvaluatorInstance<Env extends Environment> {
+  evaluate(rule: Rule, environment?: Readonly<Env>): Promise<boolean>
+  evaluateWithProof(
+    rule: Rule,
+    environment?: Readonly<Env>,
+  ): Promise<EvaluationProof>
+}
+
+export interface FilterOptions<Env extends Environment, T> {
+  readonly environment: Readonly<Env>
+  readonly term: Term<T>
+  readonly candidates?: ReadonlyArray<T>
+}
+
+export type EvaluationInput<Env extends Environment = Environment> = Env & {
+  readonly facts?: Readonly<Record<PropertyKey, unknown>>
+}
+
+const normalizeEvaluationInput = <Env extends Environment>(
+  input: Readonly<Env> | Readonly<EvaluationInput<Env>>,
+): Readonly<Env> => {
+  if (!Object.prototype.hasOwnProperty.call(input, "facts")) {
+    return input as Readonly<Env>
+  }
+
+  const candidate = input as Readonly<EvaluationInput<Env>>
+  if (candidate.facts === undefined) {
+    return input as Readonly<Env>
+  }
+
+  if (typeof candidate.facts !== "object" || candidate.facts === null) {
+    throw new Error("evaluation facts must be an object when provided")
+  }
+
+  const environment: Environment = {}
+  Reflect.ownKeys(input).forEach(key => {
+    if (key !== "facts") {
+      environment[key] = input[key as keyof typeof input]
+    }
+  })
+
+  Reflect.ownKeys(candidate.facts).forEach(key => {
+    environment[key] = candidate.facts?.[key as keyof typeof candidate.facts]
+  })
+
+  return environment as Readonly<Env>
 }
 
 export interface EvaluatorInstance<Env extends Environment> {
-  evaluate(rule: Rule, environment: Readonly<Env>): Promise<boolean>
+  evaluate(
+    rule: Rule,
+    input: Readonly<Env> | Readonly<EvaluationInput<Env>>,
+  ): Promise<boolean>
   evaluateWithProof(
     rule: Rule,
-    environment: Readonly<Env>,
+    input: Readonly<Env> | Readonly<EvaluationInput<Env>>,
   ): Promise<EvaluationProof>
+  filter<T>(
+    rule: Rule,
+    options: FilterOptions<Env, T>,
+  ): Promise<ReadonlyArray<T>>
+  prepare(
+    options: EvaluatorPrepareOptions<Env>,
+  ): Promise<PreparedEvaluatorInstance<Env>>
 }
 
 export const evaluator = <Env extends Environment, EvaluatorContext>(
   adapter: EvaluatorAdapter<Env, EvaluatorContext>,
-  options: { evaluatorContext: EvaluatorContext },
+  config: { evaluatorContext: EvaluatorContext },
 ): EvaluatorInstance<Env> => {
+  const combineEnvironments = (
+    baseEnvironment: Readonly<Env> | undefined,
+    factEnvironment: Readonly<Environment> | undefined,
+    environment: Readonly<Env> | undefined,
+  ): Readonly<Env> => {
+    return {
+      ...(baseEnvironment ?? {}),
+      ...(factEnvironment ?? {}),
+      ...(environment ?? {}),
+    } as Readonly<Env>
+  }
+
   return {
-    evaluate(rule, environment) {
+    evaluate(rule, input) {
+      const environment = normalizeEvaluationInput(input)
       return Promise.resolve(
-        adapter.evaluate(rule, environment, options.evaluatorContext),
+        adapter.evaluate(rule, environment, config.evaluatorContext),
       )
     },
-    async evaluateWithProof(rule, environment) {
+    async evaluateWithProof(rule, input) {
+      const environment = normalizeEvaluationInput(input)
       if (adapter.evaluateWithProof) {
         return adapter.evaluateWithProof(
           rule,
           environment,
-          options.evaluatorContext,
+          config.evaluatorContext,
         )
       }
 
       const ok = await adapter.evaluate(
         rule,
         environment,
-        options.evaluatorContext,
+        config.evaluatorContext,
       )
       return {
         ok,
         rule,
         details: buildEvaluationProofDetails(rule, ok),
       }
+    },
+    async prepare(prepareOptions) {
+      const baseEnvironment = prepareOptions.environment
+      const factEnvironment = prepareOptions.facts
+      const mergeWithPrepared = (
+        environment?: Readonly<Env>,
+      ): Readonly<Env> => {
+        return combineEnvironments(
+          baseEnvironment,
+          factEnvironment,
+          environment,
+        )
+      }
+
+      if (adapter.prepare) {
+        const preparedAdapter = await adapter.prepare(
+          prepareOptions,
+          config.evaluatorContext,
+        )
+        return {
+          evaluate(rule, environment) {
+            return Promise.resolve(
+              preparedAdapter.evaluate(rule, mergeWithPrepared(environment)),
+            )
+          },
+          async evaluateWithProof(rule, environment) {
+            if (preparedAdapter.evaluateWithProof) {
+              return preparedAdapter.evaluateWithProof(
+                rule,
+                mergeWithPrepared(environment),
+              )
+            }
+
+            const ok = await preparedAdapter.evaluate(
+              rule,
+              mergeWithPrepared(environment),
+            )
+            return {
+              ok,
+              rule,
+              details: buildEvaluationProofDetails(rule, ok),
+            }
+          },
+        }
+      }
+
+      return {
+        evaluate(rule, environment) {
+          return Promise.resolve(
+            adapter.evaluate(
+              rule,
+              mergeWithPrepared(environment),
+              config.evaluatorContext,
+            ),
+          )
+        },
+        async evaluateWithProof(rule, environment) {
+          if (adapter.evaluateWithProof) {
+            return adapter.evaluateWithProof(
+              rule,
+              mergeWithPrepared(environment),
+              config.evaluatorContext,
+            )
+          }
+
+          const ok = await adapter.evaluate(
+            rule,
+            mergeWithPrepared(environment),
+            config.evaluatorContext,
+          )
+          return {
+            ok,
+            rule,
+            details: buildEvaluationProofDetails(rule, ok),
+          }
+        },
+      }
+    },
+    async filter(rule, options) {
+      if (!adapter.filter) {
+        throw new Error("adapter does not support filter evaluation")
+      }
+
+      return adapter.filter(rule, options, config.evaluatorContext)
     },
   }
 }

@@ -10,6 +10,8 @@ export {
   exactly,
   through,
   term,
+  fact,
+  factIsTrue,
   attr,
   relation,
   eq,
@@ -41,16 +43,22 @@ export {
 } from "./core/algebra-inmemory"
 export {
   createPostgresAdapter,
+  planPostgresPredicate,
   planPostgresRule,
 } from "./core/algebra-postgres"
 export type {
   Environment,
   EvaluationFailingNode,
   EvaluationFailingNodeKind,
+  EvaluationInput,
+  FilterOptions,
   EvaluationProofDetails,
   EvaluationProof,
   EvaluatorAdapter,
+  EvaluatorPrepareOptions,
   EvaluatorInstance,
+  PreparedEvaluatorAdapter,
+  PreparedEvaluatorInstance,
   OutcomeToken,
   Relation,
   RuleAnnotations,
@@ -61,6 +69,7 @@ export type {
   SourceOrdering,
   SourcePredicate,
   Term,
+  Fact,
   TermInfo,
   AttributeAccessor,
   PredicateExpression,
@@ -75,6 +84,7 @@ export type {
 } from "./core/algebra-inmemory"
 export type {
   PlannedPostgresRule,
+  PlannedPostgresPredicate,
   PostgresAdapterOptions,
   PostgresSourceComparisonOperator,
   PostgresSourceOrdering,
@@ -89,4 +99,5 @@ export type {
   PostgresTermEncoder,
   PostgresTermEncoding,
   PostgresTermDomainSource,
+  PostgresTermSqlBinding,
 } from "./core/algebra-postgres"

@@ -45,6 +45,20 @@ For local MCP-driven Sonar checks in VS Code, use the SonarQube MCP tools agains
 npm install @tdreyno/he-said
 ```
 
+## Agent Skills (skills.sh)
+
+This repo ships first-party skills to help consumer agents use he-said correctly:
+
+- `he-said-guide`
+
+Install from this repository with skills.sh:
+
+```bash
+npx skills add tdreyno/he-said
+```
+
+Then use `npx skills list` to confirm they were installed for your agent environment.
+
 ## Quick Start
 
 ```ts
@@ -140,6 +154,10 @@ Evaluator:
 - `instance.evaluate(rule, environment)`
 - `instance.evaluateWithProof(rule, environment)`
   - deny proofs include `proof.failing` with deterministic `path`, `kind`, and `reason`
+- `instance.filter(rule, { environment, term, candidates? })`
+- `instance.prepare({ environment?, preload?, facts? })`
+
+Prepared evaluators let you bind request-scoped actor facts once and evaluate many rules/resources without rebuilding that actor context on every call.
 
 ## Common Building Blocks
 
@@ -166,6 +184,7 @@ Use when relation facts are persisted in SQL tables.
 - `createPostgresAdapter({ relationMappings, queryExecutor, ... })`
 - `planPostgresRule(rule, { relationMappings, environment, ... })`
   - `createPostgresAdapter` supports `includeFailingNodeSql` (default `false`) to include parameterized failing-node SQL in `proof.failing`
+- `planPostgresPredicate(rule, { relationMappings, environment, bindings?, ... })`
 
 `relationMappings[].source` supports both legacy `staticFilters` and typed predicates:
 
@@ -185,6 +204,7 @@ Use when relation facts are persisted in SQL tables.
 Typed predicates are compiled to parameterized SQL (`eq`, `in`, `gt`, `ge`, `lt`, `le`).
 
 `planPostgresRule` can produce diagnostics for join-table index hints, domain coverage for `forAll`, and other planner guidance.
+`planPostgresPredicate` returns a parameterized `EXISTS(...)` fragment for composing authorization constraints into caller-owned `WHERE` clauses.
 
 For SQL pushdown with `term.is(...)` expressions, configure `termDomains` with `columns` mappings so `attr(term, "column")` can resolve to mapped SQL columns.
 
