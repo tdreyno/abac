@@ -54,7 +54,7 @@ This repo ships first-party skills to help consumer agents use he-said correctly
 Install from this repository with skills.sh:
 
 ```bash
-npx skills add tdreyno/he-said
+npx skills add tdreyno/abac
 ```
 
 Then use `npx skills list` to confirm they were installed for your agent environment.

@@ -83,6 +83,7 @@ InMemoryAdapterOptions:
 
 - createPostgresAdapter(options)
 - planPostgresRule(rule, options)
+- planPostgresPredicate(rule, options)
 
 Postgres relation/domain sources support:
 
