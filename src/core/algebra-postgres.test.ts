@@ -6,6 +6,8 @@ import {
   eq,
   evaluator,
   forAll,
+  fact,
+  factIsTrue,
   isNotNull,
   not,
   or,
@@ -383,6 +385,18 @@ describe("postgres algebra adapter", () => {
     ).toThrow(
       "postgres adapter does not support JavaScript unary predicates; use term.is(...) with SQL expression predicates",
     )
+  })
+
+  it("fails closed when factIsTrue is unbound", () => {
+    const isAppAdmin = fact<boolean>()
+
+    const plan = planPostgresRule(factIsTrue(isAppAdmin), {
+      relationMappings: [],
+      environment: {},
+    })
+
+    expect(plan.sql).toContain("WHERE FALSE")
+    expect(plan.params).toEqual([])
   })
 
   it("plans correlated not branches as not exists subqueries", () => {

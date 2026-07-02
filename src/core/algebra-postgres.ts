@@ -156,7 +156,6 @@ export interface PlannedPostgresPredicate {
 }
 
 export interface PostgresAdapterOptions<
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   Env extends Environment = Environment,
   EvaluatorContext = unknown,
 > {
@@ -166,6 +165,7 @@ export interface PostgresAdapterOptions<
   queryExecutor: PostgresQueryExecutor
   getEvaluatorContext?: (
     evaluatorContext: EvaluatorContext,
+    environment: Readonly<Env>,
   ) => Readonly<Record<string, unknown>>
   explainQuery?: boolean
   includeFailingNodeSql?: boolean
@@ -622,16 +622,16 @@ const appendEqValue = (
   builder: QueryBuilder,
   state: PlannerState,
 ): QueryBuilder => {
-  const encodedValue = encodeTermValue(state, rule.term, rule.value)
-  const param = nextParam(state, encodedValue)
   const existing = builder.columns.get(rule.term)
 
   if (existing) {
+    const encodedValue = encodeTermValue(state, rule.term, rule.value)
+    const param = nextParam(state, encodedValue)
     builder.whereClauses.push(`${existing} IS NOT DISTINCT FROM ${param}`)
     return builder
   }
 
-  builder.columns.set(rule.term, param)
+  builder.whereClauses.push("FALSE")
   return builder
 }
 
