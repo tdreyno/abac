@@ -622,16 +622,16 @@ const appendEqValue = (
   builder: QueryBuilder,
   state: PlannerState,
 ): QueryBuilder => {
-  const encodedValue = encodeTermValue(state, rule.term, rule.value)
-  const param = nextParam(state, encodedValue)
   const existing = builder.columns.get(rule.term)
 
   if (existing) {
+    const encodedValue = encodeTermValue(state, rule.term, rule.value)
+    const param = nextParam(state, encodedValue)
     builder.whereClauses.push(`${existing} IS NOT DISTINCT FROM ${param}`)
     return builder
   }
 
-  builder.columns.set(rule.term, param)
+  builder.whereClauses.push("FALSE")
   return builder
 }
 
