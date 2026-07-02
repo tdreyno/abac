@@ -75,6 +75,20 @@ instance.evaluate(baseRule, {
   [tenant]: "acme",
 })
 
+void (async () => {
+  const prepared = await instance.prepare({
+    environment: {
+      [viewer]: { id: "u1", suspended: false },
+    },
+    facts: {
+      [tenant]: "acme",
+    },
+    preload: [memberOf],
+  })
+
+  await prepared.evaluate(baseRule)
+})()
+
 instance.filter(baseRule, {
   environment: {
     [viewer]: { id: "u1", suspended: false },

@@ -1145,11 +1145,37 @@ export interface EvaluatorAdapter<Env extends Environment, EvaluatorContext> {
     environment: Readonly<Env>,
     evaluatorContext: EvaluatorContext,
   ) => MaybePromise<EvaluationProof>
+  prepare?: (
+    options: EvaluatorPrepareOptions<Env>,
+    evaluatorContext: EvaluatorContext,
+  ) => MaybePromise<PreparedEvaluatorAdapter<Env>>
   filter?: <T>(
     rule: Rule,
     options: FilterOptions<Env, T>,
     evaluatorContext: EvaluatorContext,
   ) => MaybePromise<ReadonlyArray<T>>
+}
+
+export interface EvaluatorPrepareOptions<Env extends Environment> {
+  readonly environment?: Readonly<Env>
+  readonly preload?: ReadonlyArray<Relation<any, any>>
+  readonly facts?: Readonly<Environment>
+}
+
+export interface PreparedEvaluatorAdapter<Env extends Environment> {
+  evaluate(rule: Rule, environment: Readonly<Env>): MaybePromise<boolean>
+  evaluateWithProof?: (
+    rule: Rule,
+    environment: Readonly<Env>,
+  ) => MaybePromise<EvaluationProof>
+}
+
+export interface PreparedEvaluatorInstance<Env extends Environment> {
+  evaluate(rule: Rule, environment?: Readonly<Env>): Promise<boolean>
+  evaluateWithProof(
+    rule: Rule,
+    environment?: Readonly<Env>,
+  ): Promise<EvaluationProof>
 }
 
 export interface FilterOptions<Env extends Environment, T> {
@@ -1205,12 +1231,27 @@ export interface EvaluatorInstance<Env extends Environment> {
     rule: Rule,
     options: FilterOptions<Env, T>,
   ): Promise<ReadonlyArray<T>>
+  prepare(
+    options: EvaluatorPrepareOptions<Env>,
+  ): Promise<PreparedEvaluatorInstance<Env>>
 }
 
 export const evaluator = <Env extends Environment, EvaluatorContext>(
   adapter: EvaluatorAdapter<Env, EvaluatorContext>,
   config: { evaluatorContext: EvaluatorContext },
 ): EvaluatorInstance<Env> => {
+  const combineEnvironments = (
+    baseEnvironment: Readonly<Env> | undefined,
+    factEnvironment: Readonly<Environment> | undefined,
+    environment: Readonly<Env> | undefined,
+  ): Readonly<Env> => {
+    return {
+      ...(baseEnvironment ?? {}),
+      ...(factEnvironment ?? {}),
+      ...(environment ?? {}),
+    } as Readonly<Env>
+  }
+
   return {
     evaluate(rule, input) {
       const environment = normalizeEvaluationInput(input)
@@ -1237,6 +1278,83 @@ export const evaluator = <Env extends Environment, EvaluatorContext>(
         ok,
         rule,
         details: buildEvaluationProofDetails(rule, ok),
+      }
+    },
+    async prepare(prepareOptions) {
+      const baseEnvironment = prepareOptions.environment
+      const factEnvironment = prepareOptions.facts
+      const mergeWithPrepared = (
+        environment?: Readonly<Env>,
+      ): Readonly<Env> => {
+        return combineEnvironments(
+          baseEnvironment,
+          factEnvironment,
+          environment,
+        )
+      }
+
+      if (adapter.prepare) {
+        const preparedAdapter = await adapter.prepare(
+          prepareOptions,
+          config.evaluatorContext,
+        )
+        return {
+          evaluate(rule, environment) {
+            return Promise.resolve(
+              preparedAdapter.evaluate(rule, mergeWithPrepared(environment)),
+            )
+          },
+          async evaluateWithProof(rule, environment) {
+            if (preparedAdapter.evaluateWithProof) {
+              return preparedAdapter.evaluateWithProof(
+                rule,
+                mergeWithPrepared(environment),
+              )
+            }
+
+            const ok = await preparedAdapter.evaluate(
+              rule,
+              mergeWithPrepared(environment),
+            )
+            return {
+              ok,
+              rule,
+              details: buildEvaluationProofDetails(rule, ok),
+            }
+          },
+        }
+      }
+
+      return {
+        evaluate(rule, environment) {
+          return Promise.resolve(
+            adapter.evaluate(
+              rule,
+              mergeWithPrepared(environment),
+              config.evaluatorContext,
+            ),
+          )
+        },
+        async evaluateWithProof(rule, environment) {
+          if (adapter.evaluateWithProof) {
+            return adapter.evaluateWithProof(
+              rule,
+              mergeWithPrepared(environment),
+              config.evaluatorContext,
+            )
+          }
+
+          const ok = await adapter.evaluate(
+            rule,
+            mergeWithPrepared(environment),
+            config.evaluatorContext,
+          )
+          return {
+            ok,
+            rule,
+            details: buildEvaluationProofDetails(rule, ok),
+          }
+        },
       }
     },
     async filter(rule, options) {
