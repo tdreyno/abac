@@ -5,6 +5,7 @@ import {
   createPostgresAdapter,
   eq,
   evaluator,
+  exists,
   forAll,
   fact,
   factIsTrue,
@@ -1156,6 +1157,68 @@ describe("postgres algebra adapter", () => {
       }),
     ).toThrow(
       "postgres adapter does not support unconstrained term nodes yet; anchor the term through a relation or equality first",
+    )
+  })
+
+  it("plans exists(term) against an explicit term domain with filters", () => {
+    const document = term<{ id: string }>()
+    const plan = planPostgresRule(exists(document), {
+      relationMappings: [],
+      termDomains: [
+        {
+          term: document,
+          table: "documents",
+          valueColumn: "id",
+          staticFilters: [{ sql: "{{source}}.deleted_at IS NULL" }],
+          predicates: [{ column: "tenant_id", op: "eq", value: "t1" }],
+        },
+      ],
+      termEncodings: [{ term: document, encode: encodeId }],
+      environment: {
+        [document]: { id: "d1" },
+      },
+    })
+
+    expect(plan.sql).toContain('EXISTS(SELECT 1 FROM "documents" "exists1"')
+    expect(plan.sql).toContain('"exists1"."id" IS NOT DISTINCT FROM $1')
+    expect(plan.sql).toContain('"exists1".deleted_at IS NULL')
+    expect(plan.sql).toContain('"exists1"."tenant_id" IS NOT DISTINCT FROM $2')
+    expect(plan.params).toEqual(["d1", "t1"])
+  })
+
+  it("fails loud when exists(term) is planned with an unbound term", () => {
+    const document = term<{ id: string }>()
+
+    expect(() =>
+      planPostgresRule(exists(document), {
+        relationMappings: [],
+        termDomains: [
+          {
+            term: document,
+            table: "documents",
+            valueColumn: "id",
+          },
+        ],
+        environment: {},
+      }),
+    ).toThrow(
+      "postgres adapter cannot compile exists(term) when the term is unbound",
+    )
+  })
+
+  it("fails loud when exists(term) is planned without a term domain mapping", () => {
+    const document = term<{ id: string }>()
+
+    expect(() =>
+      planPostgresRule(exists(document), {
+        relationMappings: [],
+        termEncodings: [{ term: document, encode: encodeId }],
+        environment: {
+          [document]: { id: "d1" },
+        },
+      }),
+    ).toThrow(
+      "postgres adapter exists(term) requires a termDomains mapping for the referenced term",
     )
   })
 

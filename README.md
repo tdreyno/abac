@@ -127,6 +127,7 @@ Core constructors:
 - `term<T>().is(jsPredicateOrExpression)`
 - `attr(term, "column")`
 - `relation<Left, Right>()`
+- `exists(term)`
 - `eq(leftTerm, rightTermOrValue)`
 - `eq(attr(...), attr(...) | value)`
 - `ne`, `gt`, `ge`, `lt`, `le`, `isNull`, `isNotNull`
@@ -167,6 +168,13 @@ Prepared evaluators let you bind request-scoped actor facts once and evaluate ma
 - Reusable subrules: `letRule(name, rule)` and `ref(name)`
 - Quantified constraints: `forAll(term, constraint)`
 - Fluent relation chains: `through(term).to(relation, term)`
+
+For fail-closed admin bypass rules that must still deny missing target rows, use
+`exists(term)`:
+
+```ts
+const canAdminRead = and(factIsTrue(isAppAdmin), exists(document))
+```
 
 ## Adapters
 
