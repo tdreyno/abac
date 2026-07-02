@@ -24,5 +24,9 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm run build
       - run: npm run lint
+      - run: npm run postgres:test:up
       - run: npm run test:ci
+      - if: always()
+        continue-on-error: true
+        run: npm run postgres:test:down
       - run: npm run test:types
