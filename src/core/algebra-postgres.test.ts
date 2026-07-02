@@ -1059,6 +1059,47 @@ describe("postgres algebra adapter", () => {
     expect(captured[0]?.sql).toContain("VALUES")
   })
 
+  it("filters explicit candidates through typed term domains", async () => {
+    const document = term<{ id: string }>()
+    const captured: Array<{ sql: string; params: ReadonlyArray<unknown> }> = []
+    const adapter = createPostgresAdapter({
+      relationMappings: [],
+      termDomains: [
+        {
+          term: document,
+          table: "documents",
+          valueColumn: "id",
+        },
+      ],
+      termEncodings: [{ term: document, encode: encodeId }],
+      queryExecutor: {
+        query: async <Row extends Record<string, unknown>>(
+          sql: string,
+          params: ReadonlyArray<unknown>,
+        ) => {
+          captured.push({ sql, params })
+          return queryResult([{ candidate: "d1" } as unknown as Row])
+        },
+      },
+    })
+
+    const allowed = await adapter.filter?.(
+      exists(document),
+      {
+        environment: {},
+        term: document,
+        candidates: [{ id: "d1" }, { id: "d2" }],
+      },
+      null,
+    )
+
+    expect(allowed).toEqual(["d1"])
+    expect(captured).toHaveLength(1)
+    expect(captured[0]?.sql).toContain("= ANY(")
+    expect(captured[0]?.sql).not.toContain("VALUES")
+    expect(captured[0]?.params).toEqual([["d1", "d2"]])
+  })
+
   it("encodes bound object terms and eq values through configured term encodings", () => {
     const actor = term<{ id: string }>()
     const workspace = term<{ id: string }>()

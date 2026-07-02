@@ -5,6 +5,7 @@ import {
   createPostgresAdapter,
   eq,
   evaluator,
+  exists,
   forAll,
   not,
   or,
@@ -46,6 +47,7 @@ describe("postgres algebra adapter integration", () => {
 
     await client.query(`
       DROP TABLE IF EXISTS documents;
+      DROP TABLE IF EXISTS documents_uuid;
       DROP TABLE IF EXISTS files;
       DROP TABLE IF EXISTS projects;
       DROP TABLE IF EXISTS team_documents;
@@ -72,6 +74,11 @@ describe("postgres algebra adapter integration", () => {
 
       CREATE TABLE documents (
         id text PRIMARY KEY,
+        deleted_at timestamptz NULL
+      );
+
+      CREATE TABLE documents_uuid (
+        id uuid PRIMARY KEY,
         deleted_at timestamptz NULL
       );
 
@@ -124,6 +131,11 @@ describe("postgres algebra adapter integration", () => {
       VALUES
         ('d1', NULL),
         ('d2', NULL);
+
+      INSERT INTO documents_uuid (id, deleted_at)
+      VALUES
+        ('7d3c8e0a-2f5c-4b7e-9a53-2f4e8f0a1b2c', NULL),
+        ('4a6e5c31-0868-4f77-9f4c-35ffd3cb2290', NULL);
 
       INSERT INTO projects (id, team_id)
       VALUES
@@ -690,6 +702,40 @@ describe("postgres algebra adapter integration", () => {
         [document]: { id: "d1" },
       }),
     ).resolves.toBe(false)
+  })
+
+  it("filters uuid candidates through a term domain", async () => {
+    const document = term<{ id: string }>()
+    const documentExists = exists(document)
+
+    const adapter = createPostgresAdapter({
+      relationMappings: [],
+      termDomains: [
+        {
+          term: document,
+          table: "documents_uuid",
+          valueColumn: "id",
+        },
+      ],
+      termEncodings: [{ term: document, encode: value => value.id }],
+      queryExecutor: {
+        async query(sql, params) {
+          const result = await client.query(sql, [...params])
+          return { rows: result.rows }
+        },
+      },
+    })
+    const instance = evaluator(adapter, {
+      evaluatorContext: null,
+    })
+
+    await expect(
+      instance.filter(documentExists, {
+        environment: {},
+        term: document,
+        candidates: [{ id: "7d3c8e0a-2f5c-4b7e-9a53-2f4e8f0a1b2c" }],
+      }),
+    ).resolves.toEqual(["7d3c8e0a-2f5c-4b7e-9a53-2f4e8f0a1b2c"])
   })
 
   it("evaluates forall with relation-derived candidates (no explicit domain)", async () => {

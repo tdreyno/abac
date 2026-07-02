@@ -2065,6 +2065,53 @@ export const createPostgresAdapter = <
       const candidateSql =
         filterOptions.candidates && filterOptions.candidates.length > 0
           ? (() => {
+              const explicitDomain = state.termDomains.get(filterOptions.term)
+              if (explicitDomain) {
+                const alias = nextAlias(state, "dom")
+                const builder = createBuilder()
+                const valueSql = `${quoteIdentifier(alias)}.${quoteIdentifier(explicitDomain.valueColumn)}`
+                const encodedCandidates = filterOptions.candidates.map(
+                  candidate =>
+                    encodeTermValue(state, filterOptions.term, candidate),
+                )
+                const nonNullCandidates = encodedCandidates.filter(
+                  candidate => candidate !== null,
+                )
+                const includesNullCandidate =
+                  nonNullCandidates.length !== encodedCandidates.length
+
+                builder.fromClauses.push(
+                  `FROM ${quoteQualifiedIdentifier(explicitDomain.table)} ${quoteIdentifier(alias)}`,
+                )
+                const candidateClauses: Array<string> = []
+                if (nonNullCandidates.length > 0) {
+                  const candidatesParam = nextParam(state, nonNullCandidates)
+                  candidateClauses.push(`${valueSql} = ANY(${candidatesParam})`)
+                }
+                if (includesNullCandidate) {
+                  candidateClauses.push(`${valueSql} IS NULL`)
+                }
+                if (candidateClauses.length > 0) {
+                  builder.whereClauses.push(
+                    candidateClauses.length === 1
+                      ? candidateClauses[0]!
+                      : `(${candidateClauses.join(" OR ")})`,
+                  )
+                }
+                appendStaticFilters(
+                  builder,
+                  state,
+                  alias,
+                  explicitDomain.staticFilters,
+                )
+                const where =
+                  builder.whereClauses.length === 0
+                    ? ""
+                    : ` WHERE ${builder.whereClauses.join(" AND ")}`
+
+                return `SELECT DISTINCT ${valueSql} AS candidate ${builder.fromClauses.join(" ")}${where}`
+              }
+
               const valuesSql = filterOptions.candidates
                 .map(candidate => {
                   return `(${nextParam(
