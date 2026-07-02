@@ -7,6 +7,7 @@ import {
   type EvaluatorPrepareOptions,
   getPredicateExpressionTerms,
   isAttributeAccessor,
+  isFact,
   isPredicateExpression,
   type PredicateExpression,
   type PreparedEvaluatorAdapter,
@@ -761,6 +762,12 @@ const appendEqValue = (
     const param = nextParam(state, encodedValue)
     builder.whereClauses.push(`${existing} IS NOT DISTINCT FROM ${param}`)
     return builder
+  }
+
+  if (isFact(rule.term)) {
+    throw new Error(
+      "fact used in factIsTrue(...) must be bound in the evaluation environment",
+    )
   }
 
   builder.whereClauses.push("FALSE")

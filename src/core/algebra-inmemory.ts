@@ -7,6 +7,7 @@ import {
   type EvaluatorAdapter,
   getPredicateExpressionTerms,
   isAttributeAccessor,
+  isFact,
   isPredicateExpression,
   type PredicateExpression,
   type Relation,
@@ -755,6 +756,11 @@ const solveRule = async (
 
       environments.forEach(environment => {
         if (!hasBinding(environment, rule.term)) {
+          if (isFact(rule.term)) {
+            throw new Error(
+              "fact used in factIsTrue(...) must be bound in the evaluation environment",
+            )
+          }
           output.push(bindValue(environment, rule.term, rule.value))
           return
         }

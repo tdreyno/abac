@@ -483,6 +483,41 @@ describe("algebra api", () => {
     ).resolves.toBe(false)
   })
 
+  it("throws when factIsTrue is evaluated without binding the fact", async () => {
+    const isAppAdmin = fact<boolean>()
+    const adapter = createInMemoryAdapter({ relations: [] })
+    const instance = evaluator(adapter, {
+      evaluatorContext: null,
+    })
+
+    await expect(instance.evaluate(factIsTrue(isAppAdmin), {})).rejects.toThrow(
+      "fact used in factIsTrue(...) must be bound in the evaluation environment",
+    )
+  })
+
+  it("throws for unbound factIsTrue inside or and not branches", async () => {
+    const isAppAdmin = fact<boolean>()
+    const adapter = createInMemoryAdapter({ relations: [] })
+    const instance = evaluator(adapter, {
+      evaluatorContext: null,
+    })
+
+    await expect(
+      instance.evaluate(
+        or(factIsTrue(isAppAdmin), eq(term<boolean>(), true)),
+        {},
+      ),
+    ).rejects.toThrow(
+      "fact used in factIsTrue(...) must be bound in the evaluation environment",
+    )
+
+    await expect(
+      instance.evaluate(algebra.not(factIsTrue(isAppAdmin)), {}),
+    ).rejects.toThrow(
+      "fact used in factIsTrue(...) must be bound in the evaluation environment",
+    )
+  })
+
   it("supports oneOf membership checks", async () => {
     const action = term<string>()
     const adapter = createInMemoryAdapter({
@@ -1090,5 +1125,26 @@ describe("algebra api", () => {
     expect(capturedEnvironments[1]?.[viewer]).toEqual({ id: "u1" })
     expect(capturedEnvironments[0]?.[document]).toEqual({ id: "d1" })
     expect(capturedEnvironments[1]?.[document]).toEqual({ id: "d2" })
+  })
+
+  it("lets per-evaluate fact bindings override prepared facts", async () => {
+    const isAppAdmin = fact<boolean>()
+    const adapter = createInMemoryAdapter({ relations: [] })
+    const instance = evaluator(adapter, {
+      evaluatorContext: null,
+    })
+
+    const prepared = await instance.prepare({
+      facts: {
+        [isAppAdmin]: true,
+      },
+    })
+
+    await expect(prepared.evaluate(factIsTrue(isAppAdmin))).resolves.toBe(true)
+    await expect(
+      prepared.evaluate(factIsTrue(isAppAdmin), {
+        [isAppAdmin]: false,
+      }),
+    ).resolves.toBe(false)
   })
 })

@@ -132,6 +132,7 @@ export type TermPredicate<T, Env extends Environment = Environment> =
 type AnyTermPredicate = TermPredicate<unknown, Environment>
 
 type TermMetadata = {
+  kind: "term" | "fact"
   root: AnyTerm
   predicates: Array<AnyTermPredicate>
 }
@@ -142,10 +143,11 @@ const createDerivedTerm = <T, Env extends Environment = Environment>(
   value: Term<T>,
   predicate: TermPredicate<T, Env>,
 ): Term<T> => {
-  const source = normalizeTerm(value)
+  const source = getTermMetadata(value)
   const derived = Symbol("rules.term.derived") as Term<T>
 
   termMetadata.set(derived as AnyTerm, {
+    kind: source.kind,
     root: source.root as AnyTerm,
     predicates: [
       ...(source.predicates as Array<AnyTermPredicate>),
@@ -201,8 +203,9 @@ const installTermIsMethod = (): void => {
 
 installTermIsMethod()
 
-const registerBaseTerm = <T>(value: Term<T>): void => {
+const registerBaseTerm = <T>(value: Term<T>, kind: "term" | "fact"): void => {
   termMetadata.set(value as AnyTerm, {
+    kind,
     root: value as AnyTerm,
     predicates: [],
   })
@@ -573,8 +576,16 @@ const createBaseTerm = <T>(
   const label = normalizeSymbolLabel(options)
   const symbolLabel = label ? `rules.${kind}.${label}` : `rules.${kind}`
   const value = Symbol(symbolLabel) as Term<T>
-  registerBaseTerm(value)
+  registerBaseTerm(value, kind)
   return value
+}
+
+export const isFact = (value: unknown): value is Fact<unknown> => {
+  if (!isKnownTerm(value)) {
+    return false
+  }
+
+  return getTermMetadata(value as Term<unknown>).kind === "fact"
 }
 
 export const isAttributeAccessor = (

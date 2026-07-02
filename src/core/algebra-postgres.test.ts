@@ -507,16 +507,43 @@ describe("postgres algebra adapter", () => {
     )
   })
 
-  it("fails closed when factIsTrue is unbound", () => {
+  it("throws when factIsTrue is unbound", () => {
     const isAppAdmin = fact<boolean>()
 
-    const plan = planPostgresRule(factIsTrue(isAppAdmin), {
-      relationMappings: [],
-      environment: {},
-    })
+    expect(() =>
+      planPostgresRule(factIsTrue(isAppAdmin), {
+        relationMappings: [],
+        environment: {},
+      }),
+    ).toThrow(
+      "fact used in factIsTrue(...) must be bound in the evaluation environment",
+    )
+  })
 
-    expect(plan.sql).toContain("WHERE FALSE")
-    expect(plan.params).toEqual([])
+  it("throws when an unbound factIsTrue appears in an or branch", () => {
+    const isAppAdmin = fact<boolean>()
+
+    expect(() =>
+      planPostgresRule(or(factIsTrue(isAppAdmin), eq(term<boolean>(), true)), {
+        relationMappings: [],
+        environment: {},
+      }),
+    ).toThrow(
+      "fact used in factIsTrue(...) must be bound in the evaluation environment",
+    )
+  })
+
+  it("throws when an unbound factIsTrue appears in a not branch", () => {
+    const isAppAdmin = fact<boolean>()
+
+    expect(() =>
+      planPostgresRule(not(factIsTrue(isAppAdmin)), {
+        relationMappings: [],
+        environment: {},
+      }),
+    ).toThrow(
+      "fact used in factIsTrue(...) must be bound in the evaluation environment",
+    )
   })
 
   it("plans correlated not branches as not exists subqueries", () => {
@@ -1300,6 +1327,40 @@ describe("postgres algebra adapter", () => {
       entry.sql.startsWith("SELECT EXISTS("),
     )
     expect(evaluationQuery?.params).toEqual(["f1"])
+  })
+
+  it("lets per-evaluate fact bindings override prepared facts", async () => {
+    const isAppAdmin = fact<boolean>()
+    const adapter = createPostgresAdapter({
+      relationMappings: [],
+      queryExecutor: {
+        query: async <Row extends Record<string, unknown>>(
+          _sql: string,
+          params: ReadonlyArray<unknown>,
+        ) => {
+          const [boundFact, expected] = params
+          return queryResult([
+            { ok: Object.is(boundFact, expected) } as unknown as Row,
+          ])
+        },
+      },
+    })
+    const instance = evaluator(adapter, {
+      evaluatorContext: null,
+    })
+
+    const prepared = await instance.prepare({
+      facts: {
+        [isAppAdmin]: true,
+      },
+    })
+
+    await expect(prepared.evaluate(factIsTrue(isAppAdmin))).resolves.toBe(true)
+    await expect(
+      prepared.evaluate(factIsTrue(isAppAdmin), {
+        [isAppAdmin]: false,
+      }),
+    ).resolves.toBe(false)
   })
 
   it("fails when static filter params are provided without SQL placeholders", () => {
