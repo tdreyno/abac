@@ -140,12 +140,14 @@ import { term, given, relation } from "@tdreyno/he-said"
 
 const user = term<User>()
 const workspace = term<Workspace>()
+const readPermission = term<Permission>()
 const permission = relation<User, Permission>()
+const belongsToWorkspace = relation<User, Workspace>()
 
 // "user has permission, given they're in the workspace"
 const rule = given(
-  permission(user, readDoc),
-  relation(userBelongsToWorkspace, [user, workspace]),
+  permission(user, readPermission),
+  belongsToWorkspace(user, workspace),
 )
 ```
 
