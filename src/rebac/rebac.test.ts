@@ -260,6 +260,61 @@ describe("rebac facade", () => {
     ).resolves.toBe(true)
   })
 
+  it("supports through(...).at(...) anchors for bound intermediates", async () => {
+    const node = term<string>()
+    const branch = term<string>()
+    const team = term<string>()
+    const nodeInBranch = relation<string, string>()
+    const branchInTeam = relation<string, string>()
+
+    const anchoredPath = through(nodeInBranch).at(branch).through(branchInTeam)
+    const unanchoredPath = through(nodeInBranch, branchInTeam)
+
+    const adapter = createInMemoryAdapter({
+      relations: [
+        {
+          relation: nodeInBranch,
+          pairs: [
+            ["node-1", "branch-1"],
+            ["node-1", "branch-2"],
+          ],
+        },
+        {
+          relation: branchInTeam,
+          pairs: [
+            ["branch-1", "team-1"],
+            ["branch-2", "team-2"],
+          ],
+        },
+      ],
+      domain: ["node-1", "branch-1", "branch-2", "team-1", "team-2"],
+    })
+    const runtime = evaluator(adapter, { evaluatorContext: null })
+
+    await expect(
+      runtime.evaluate(anchoredPath(node, team), {
+        [node]: "node-1",
+        [branch]: "branch-1",
+        [team]: "team-1",
+      }),
+    ).resolves.toBe(true)
+
+    await expect(
+      runtime.evaluate(anchoredPath(node, team), {
+        [node]: "node-1",
+        [branch]: "branch-1",
+        [team]: "team-2",
+      }),
+    ).resolves.toBe(false)
+
+    await expect(
+      runtime.evaluate(unanchoredPath(node, team), {
+        [node]: "node-1",
+        [team]: "team-2",
+      }),
+    ).resolves.toBe(true)
+  })
+
   it("supports override grants as arbitrary core rules", async () => {
     const actor = term<User>()
     const team = term<Team>()
@@ -549,6 +604,40 @@ describe("resourceType", () => {
       runtime.evaluate(ownerRule, {
         [NodeResource.term]: "n1",
         [scopeTerm]: "team-2",
+      }),
+    ).resolves.toBe(false)
+  })
+
+  it("supports custom existence rules for composite-aware checks", async () => {
+    const nodeInBranch = relation<string, Branch>()
+    const branchTerm = term<Branch>()
+    const NodeResource = resourceType<
+      string,
+      Team,
+      { branchId: typeof branchTerm }
+    >({
+      context: { branchId: branchTerm },
+      existence: (resource, context) =>
+        nodeInBranch(resource, context.branchId),
+      owner: through(nodeInBranch),
+    })
+    const adapter = createInMemoryAdapter({
+      relations: [{ relation: nodeInBranch, pairs: [["n1", "branch-1"]] }],
+      domain: ["n1", "branch-1", "branch-2"],
+    })
+    const runtime = evaluator(adapter, { evaluatorContext: null })
+
+    await expect(
+      runtime.evaluate(NodeResource.exists(), {
+        [NodeResource.term]: "n1",
+        [branchTerm]: "branch-1",
+      }),
+    ).resolves.toBe(true)
+
+    await expect(
+      runtime.evaluate(NodeResource.exists(), {
+        [NodeResource.term]: "n1",
+        [branchTerm]: "branch-2",
       }),
     ).resolves.toBe(false)
   })

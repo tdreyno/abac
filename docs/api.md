@@ -108,6 +108,7 @@ Postgres relation/domain sources support:
 - `grant.readScope()`
 - `grant.deny()`
 - `through(relA, relB, ...)`
+- `through(relA).at(term).through(relB, ...)`
 - `either(pathA, pathB, ...)`
 - `scopedPolicy(config)`
 

@@ -1,5 +1,5 @@
 import { relation, term, type Environment } from ".."
-import { grant, roleTiers, scopedPolicy, through } from "./index"
+import { grant, resourceType, roleTiers, scopedPolicy, through } from "./index"
 
 type User = { id: string }
 type Team = { id: string }
@@ -35,6 +35,25 @@ const policy = scopedPolicy({
     manage: grant.deny(),
   },
 })
+
+const anchoredDocumentPath = through(documentInTeam)
+  .at(team)
+  .through(teamInWorkspace)
+anchoredDocumentPath(term<Document>(), term<Workspace>())
+
+const branch = term<{ id: string }>()
+const documentInBranch = relation<Document, { id: string }>()
+const compositeDocument = resourceType<
+  Document,
+  Team,
+  { branchId: typeof branch }
+>({
+  context: { branchId: branch },
+  existence: (resource, context) =>
+    documentInBranch(resource, context.branchId),
+  owner: through(documentInTeam),
+})
+compositeDocument.exists()
 
 policy.ruleFor("write", "Document")
 policy.ruleFor("manage", "Document")

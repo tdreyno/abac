@@ -177,48 +177,82 @@ export type ScopePath<Resource, Scope> = (
   scope: Term<Scope>,
 ) => Rule
 
+export type ThroughPath<Resource, Scope> = ScopePath<Resource, Scope> & {
+  at(anchor: Term<any>): ThroughPath<Resource, Scope>
+  through(
+    ...relations: ReadonlyArray<Relation<any, any>>
+  ): ThroughPath<Resource, Scope>
+}
+
 export function through<Resource, Scope>(
   relation: Relation<Resource, Scope>,
-): ScopePath<Resource, Scope>
+): ThroughPath<Resource, Scope>
 export function through<Resource, Step1, Scope>(
   relation1: Relation<Resource, Step1>,
   relation2: Relation<Step1, Scope>,
-): ScopePath<Resource, Scope>
+): ThroughPath<Resource, Scope>
 export function through<Resource, Step1, Step2, Scope>(
   relation1: Relation<Resource, Step1>,
   relation2: Relation<Step1, Step2>,
   relation3: Relation<Step2, Scope>,
-): ScopePath<Resource, Scope>
+): ThroughPath<Resource, Scope>
 export function through<Resource, Step1, Step2, Step3, Scope>(
   relation1: Relation<Resource, Step1>,
   relation2: Relation<Step1, Step2>,
   relation3: Relation<Step2, Step3>,
   relation4: Relation<Step3, Scope>,
-): ScopePath<Resource, Scope>
+): ThroughPath<Resource, Scope>
 export function through(
-  ...relations: ReadonlyArray<Relation<unknown, unknown>>
-): ScopePath<unknown, unknown> {
+  ...relations: ReadonlyArray<Relation<any, any>>
+): ThroughPath<unknown, unknown> {
   if (relations.length === 0) {
     throw new Error("through requires at least one relation")
   }
 
-  return (resource, scope) => {
-    const steps: Array<Rule> = []
-    let current: Term<unknown> = resource as unknown as Term<unknown>
+  const create = (
+    chain: ReadonlyArray<Relation<any, any>>,
+    anchors: ReadonlyArray<Term<unknown>>,
+  ): ThroughPath<unknown, unknown> => {
+    const path = ((resource, scope) => {
+      if (anchors.length > Math.max(0, chain.length - 1)) {
+        throw new Error("through.at() anchors exceed intermediate path steps")
+      }
 
-    relations.forEach((entry, index) => {
-      const isLast = index === relations.length - 1
-      const next: Term<unknown> = isLast
-        ? (scope as unknown as Term<unknown>)
-        : term<unknown>(`rebac.path.${index}`)
-      steps.push(
-        (entry as unknown as Relation<unknown, unknown>)(current, next),
-      )
-      current = next
-    })
+      const steps: Array<Rule> = []
+      let current: Term<unknown> = resource as unknown as Term<unknown>
 
-    return and(...steps)
+      chain.forEach((entry, index) => {
+        const isLast = index === chain.length - 1
+        const next: Term<unknown> = isLast
+          ? (scope as unknown as Term<unknown>)
+          : ((anchors[index] ??
+              term<unknown>(`rebac.path.${index}`)) as Term<unknown>)
+        steps.push(
+          (entry as unknown as Relation<unknown, unknown>)(current, next),
+        )
+        current = next
+      })
+
+      return and(...steps)
+    }) as ThroughPath<unknown, unknown>
+
+    path.at = (anchor: Term<any>) => {
+      return create(chain, [...anchors, anchor as Term<unknown>])
+    }
+
+    path.through = (...nextRelations: ReadonlyArray<Relation<any, any>>) => {
+      if (nextRelations.length === 0) {
+        throw new Error(
+          "through(...).through(...) requires at least one relation",
+        )
+      }
+      return create([...chain, ...nextRelations], anchors)
+    }
+
+    return path
   }
+
+  return create(relations, [])
 }
 
 export const either = <Resource, Scope>(

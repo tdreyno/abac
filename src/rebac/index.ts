@@ -13,6 +13,7 @@ export {
   type ScopedPolicy,
   type ScopedPolicyOptions,
   type ScopePath,
+  type ThroughPath,
 } from "./rebac-builder"
 export {
   resourceType,

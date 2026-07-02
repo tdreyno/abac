@@ -26,6 +26,8 @@ export interface ResourceTypeOptions<
   key?: string
   /** Extra context terms for composite-key resources, e.g. { branchId: branchTerm }. */
   context?: Context
+  /** Optional custom existence rule, useful for composite refs. */
+  existence?: (resource: Term<T>, context: Context) => Rule
   /** Path from this resource to the owning scope. */
   owner: ScopePath<T, Scope>
 }
@@ -67,7 +69,13 @@ export const resourceType = <
   options: ResourceTypeOptions<T, Scope, Context>,
 ): ResourceType<T, Scope, Context> => {
   const resourceTerm = term<T>()
-  const { table, key = "id", context = {} as Context, owner } = options
+  const {
+    table,
+    key = "id",
+    context = {} as Context,
+    existence,
+    owner,
+  } = options
 
   return {
     _kind: "resource-type",
@@ -78,6 +86,9 @@ export const resourceType = <
     _context: context,
 
     exists() {
+      if (existence) {
+        return existence(resourceTerm, context)
+      }
       return coreExists(resourceTerm)
     },
 

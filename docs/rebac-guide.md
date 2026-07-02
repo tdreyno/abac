@@ -50,6 +50,8 @@ const policy = scopedPolicy({
 ## Ownership Helpers
 
 - `through(relA, relB, ...)`: compose an ownership chain.
+- `through(relA).at(term).through(relB, ...)`: bind intermediate hops to
+  caller-provided context terms (composite-safe paths).
 - `either(pathA, pathB)`: support disjoint parent models.
 - `resourceType(...).ownedBy(scopeTerm)`: export the exact ownership rule from
   the resource declaration for reuse outside `scopedPolicy`.
@@ -69,6 +71,9 @@ to mirror those predicates onto adapter relation sources.
 `policy.termDomains` auto-derives Postgres `termDomains` for table-backed
 `resourceType(...)` entries so `exists(term)` can be wired without a manual
 registration loop.
+
+For composite resources, `resourceType({ existence })` lets you override
+`resource.exists()` so existence checks include bound context terms.
 
 This keeps rules declarative while preserving adapter-level pushdown for both:
 
