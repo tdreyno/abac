@@ -1,5 +1,13 @@
 # @tdreyno/he-said
 
+## 0.3.1
+
+### Patch Changes
+
+- 4fde42c: Require `factIsTrue(...)` facts to be explicitly bound during evaluation and planning. Unbound facts now throw instead of silently matching, including in `or`/`not` branches, with regression coverage for in-memory and Postgres adapters plus prepared fact override behavior.
+- 6f3dce9: Fix Postgres rule planning so unreferenced environment terms are no longer bound as dangling SQL parameters. This prevents `42P18` errors when evaluating rules with a shared environment shape and adds regression coverage across planning and prepared evaluation paths.
+- 5c42b6d: Fix `@tdreyno/he-said/rebac` tier enforcement so `grant.atLeast(...)` is encoded in the compiled membership rule instead of relying on external `sourceFor(...)` wiring. This closes a fail-open path where lower-tier members could pass higher-tier checks when only base membership mappings were configured, and adds regression coverage across ReBAC, in-memory evaluation, and Postgres planning.
+
 ## 0.3.0
 
 ### Minor Changes
