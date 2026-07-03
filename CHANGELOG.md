@@ -1,5 +1,13 @@
 # @tdreyno/he-said
 
+## 0.7.0
+
+### Minor Changes
+
+- 9656dd0: Add `edge(leftColumnRef, rightColumnRef, options?)` to
+  `@tdreyno/he-said/drizzle` for typed same-table relation sources when
+  `fromFk(...)` inference cannot apply.
+
 ## 0.6.1
 
 ### Patch Changes
