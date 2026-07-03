@@ -6,6 +6,7 @@ import {
   bindRowVar,
   drizzleExecutor,
   drizzleResourceType,
+  edge,
   fromFk,
   inColumn,
   rowVar,
@@ -28,6 +29,40 @@ describe("drizzle bridge", () => {
       leftColumn: "id",
       rightColumn: "system_id",
     })
+  })
+
+  it("builds edge relation sources from typed column pairs", () => {
+    const branches = pgTable("branches", {
+      id: text("id").primaryKey(),
+      systemId: text("system_id").notNull(),
+      status: text("status").notNull(),
+    })
+
+    expect(
+      edge(branches.id, branches.systemId, {
+        predicates: [inColumn(branches.status, ["active"])],
+        staticFilters: [{ sql: "status = $1", params: ["active"] }],
+      }),
+    ).toEqual({
+      kind: "edge",
+      table: "branches",
+      leftColumn: "id",
+      rightColumn: "system_id",
+      predicates: [{ column: "status", op: "in", values: ["active"] }],
+      staticFilters: [{ sql: "status = $1", params: ["active"] }],
+    })
+  })
+
+  it("rejects edge relation sources across different tables", () => {
+    const systems = pgTable("systems", { id: text("id").primaryKey() })
+    const branches = pgTable("branches", {
+      id: text("id").primaryKey(),
+      systemId: text("system_id").notNull(),
+    })
+
+    expect(() => edge(branches.id, systems.id)).toThrow(
+      "edge() columns must belong to the same table (got branches, systems)",
+    )
   })
 
   it("builds association-table sources and typed in predicates", () => {

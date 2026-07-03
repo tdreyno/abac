@@ -4,6 +4,7 @@ import {
   type AnyPgTable,
 } from "drizzle-orm/pg-core"
 import type {
+  PostgresEdgeRelationSource,
   PostgresJoinTableRelationSource,
   PostgresQueryExecutor,
   PostgresTermDomainSource,
@@ -84,6 +85,42 @@ export const fromFk = (column: AnyPgColumn) => {
     table: qualifyTable({ name: tableConfig.name, schema: tableConfig.schema }),
     fk: foreignColumn.name,
     pk: leftPrimaryKey.name,
+  })
+}
+
+export const edge = (
+  left: AnyPgColumn,
+  right: AnyPgColumn,
+  options?: {
+    predicates?: ReadonlyArray<SourcePredicate>
+    staticFilters?: PostgresEdgeRelationSource["staticFilters"]
+  },
+): PostgresEdgeRelationSource => {
+  const leftTable = left.table as AnyPgTable
+  const rightTable = right.table as AnyPgTable
+  const leftConfig = getTableConfig(leftTable)
+  const rightConfig = getTableConfig(rightTable)
+  const leftName = qualifyTable({
+    name: leftConfig.name,
+    schema: leftConfig.schema,
+  })
+  const rightName = qualifyTable({
+    name: rightConfig.name,
+    schema: rightConfig.schema,
+  })
+
+  if (leftName !== rightName) {
+    throw new Error(
+      `edge() columns must belong to the same table (got ${leftName}, ${rightName})`,
+    )
+  }
+
+  return belongsTo({
+    table: leftName,
+    pk: left.name,
+    fk: right.name,
+    predicates: options?.predicates,
+    staticFilters: options?.staticFilters,
   })
 }
 

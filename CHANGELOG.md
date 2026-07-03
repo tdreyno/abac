@@ -14,6 +14,9 @@
 
   - add `rowVar(table)` to `@tdreyno/he-said/drizzle`, exposing typed `.$` column
     accessors for Drizzle model terms.
+  - add `edge(leftColumnRef, rightColumnRef, options?)` to
+    `@tdreyno/he-said/drizzle` for explicit typed same-table relation sources when
+    `fromFk(...)` inference cannot apply.
   - add `rowVarDomain(rowVar)`, `rowVarEncoding(rowVar)`, and
     `bindRowVar(rowVar, value)` to remove string table/column duplication when
     wiring Postgres planner options.

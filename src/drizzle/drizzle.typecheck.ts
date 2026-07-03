@@ -1,7 +1,7 @@
 import { pgTable, text } from "drizzle-orm/pg-core"
 import { eq, relation } from ".."
 import { through } from "../rebac"
-import { rowVar, via } from "./index"
+import { edge, rowVar, via } from "./index"
 
 const systems = pgTable("systems", {
   id: text("id").primaryKey(),
@@ -27,3 +27,5 @@ const branchInSystem = relation<
   typeof systems.$inferSelect
 >()
 through(via(branchInSystem))(branch, system)
+
+edge(branches.id, branches.systemId)

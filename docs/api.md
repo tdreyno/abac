@@ -124,6 +124,7 @@ algebra rules and returns:
 ### Drizzle Bridge (`@tdreyno/he-said/drizzle`)
 
 - `fromFk(columnRef)`
+- `edge(leftColumnRef, rightColumnRef, { predicates?, staticFilters? })`
 - `associatesTable(table, { left, right, predicates? })`
 - `inColumn(columnRef, values)`
 - `drizzleResourceType(table, { owner, contextTerms?, fixed? })`
